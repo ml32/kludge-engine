@@ -1,0 +1,7 @@
+*.o
+*.so
+*.exe
+*.dll
+
+test
+test_assets/
