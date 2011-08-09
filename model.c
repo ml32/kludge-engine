@@ -32,12 +32,10 @@ kl_model_t *kl_model_load(char *path) {
   kl_model_t *model = NULL;
   if (kl_model_isiqm2(data, size)) {
     model = kl_model_loadiqm2(data);
-    goto cleanup;
   }
   /* other loaders go here, follow above format */
 
 
-  cleanup:
   if (model == NULL) {
     fprintf(stderr, "Model: Failed to load %s!\n", path);
   }

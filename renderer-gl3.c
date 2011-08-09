@@ -10,10 +10,10 @@
 
 kl_mat4f_t kl_render_mat_view = {
   .cell = {
-     0.0f, 0.0f, -1.0f, 0.0f,
-    -1.0f, 0.0f,  0.0f, 0.0f,
-     0.0f, 1.0f,  0.0f, 0.0f,
-     0.0f, 0.0f,  0.0f, 1.0f
+     0.0f,  0.0f,  1.0f, 0.0f,
+     1.0f,  0.0f,  0.0f, 0.0f,
+     0.0f,  1.0f,  0.0f, 0.0f,
+     0.0f,  0.0f,  0.0f, 1.0f
   }
 };
 kl_mat4f_t kl_render_mat_proj = KL_MAT4F_IDENTITY;
@@ -21,8 +21,8 @@ kl_mat4f_t kl_render_mat_proj = KL_MAT4F_IDENTITY;
 static const char *vshader_default_src =
 "#version 330\n"
 "layout(std140) uniform scene {\n"
-"  uniform mat4 mvmatrix;\n"
-"  uniform mat4 mvpmatrix;\n"
+"  mat4 mvmatrix;\n"
+"  mat4 mvpmatrix;\n"
 "};\n"
 "in vec3 vposition;\n"
 "in vec2 vtexcoord;\n"
@@ -34,27 +34,34 @@ static const char *vshader_default_src =
 "  ftexcoord = vtexcoord;\n"
 "\n"
 "  vec3 vbitangent = cross(vnormal, vtangent.xyz) * vtangent.w;\n"
-"  tbnmatrix = mat3(mvmatrix[0].xyz, mvmatrix[1].xyz, mvmatrix[2].xyz) * mat3(vtangent.xyz, vbitangent, vnormal);\n"
+"  tbnmatrix = mat3(vtangent.xyz, vbitangent, vnormal);\n"
 "\n"
 "  gl_Position = mvpmatrix * vec4(vposition, 1);\n"
 "}\n";
 
 static const char *fshader_default_src =
 "#version 330\n"
+"uniform sampler2D diffuse;\n"
+"uniform sampler2D normal;\n"
+"uniform sampler2D specular;\n"
 "smooth in vec2 ftexcoord;\n"
 "smooth in mat3 tbnmatrix;\n"
 "out vec4 color;\n"
 "void main() {\n"
-"  color.rgb = (tbnmatrix * vec3(0, 0, 1) + 1)/2;\n"
-"  color.b   = 1.0-color.b;\n"
-"  color.a   = 1;\n"
+"  vec3 n_local = texture2D(normal, ftexcoord).xyz * 2 - 1;\n"
+"  vec3 n_world = normalize(tbnmatrix * n_local);\n"
+"  vec4 d = texture2D(diffuse, ftexcoord);\n"
+"  color = d * dot(n_world, normalize(vec3(-2, -1, 1)));\n"
 "}\n";
 
 static int fshader_default = 0;
 static int vshader_default = 0;
 static int program_default = 0;
-static int program_default_scene = 0;
-static int ubo_scene = 0;
+static int program_default_scene    = 0;
+static int program_default_diffuse  = 0;
+static int program_default_normal   = 0;
+static int program_default_specular = 0;
+static int ubo_scene    = 0;
 
 typedef struct uniform_scene {
   kl_mat4f_t mv;
@@ -64,12 +71,32 @@ typedef struct uniform_scene {
 #define LOGBUFFER_SIZE 0x4000
 static char logbuffer[LOGBUFFER_SIZE];
 
+static int convertenum(int value) {
+  switch (value) {
+    case KL_RENDER_FLOAT:
+      return GL_FLOAT;
+    case KL_RENDER_UINT8:
+      return GL_UNSIGNED_BYTE;
+    case KL_RENDER_UINT16:
+      return GL_UNSIGNED_SHORT;
+    case KL_RENDER_RGB:
+      return GL_RGB;
+    case KL_RENDER_RGBA:
+      return GL_RGBA;
+    case KL_RENDER_GRAY:
+      return GL_RED;
+    case KL_RENDER_GRAYA:
+      return GL_RG;
+  }
+  return GL_FALSE;
+}
+
 int kl_render_init() {
   int w, h;
   kl_vid_size(&w, &h);
 
   float ratio = (float)w/(float)h;
-  kl_mat4f_ortho(&kl_render_mat_proj, -10.0f*ratio, 10.0f*ratio, -10.0f, 10.0f, 10.0f, -10.0f);
+  kl_mat4f_ortho(&kl_render_mat_proj, -50.0f*ratio, 50.0f*ratio, -50.0f, 50.0f, 50.0f, -50.0f);
 
   int status, len;
 
@@ -112,7 +139,10 @@ int kl_render_init() {
     return -1;
   }
 
-  program_default_scene = glGetUniformBlockIndex(program_default, "scene");
+  program_default_scene    = glGetUniformBlockIndex(program_default, "scene");
+  program_default_diffuse  = glGetUniformLocation(program_default, "diffuse");
+  program_default_normal   = glGetUniformLocation(program_default, "normal");
+  program_default_specular = glGetUniformLocation(program_default, "specular");
 
   glGenBuffers(1, (unsigned int*)&ubo_scene);
 
@@ -132,13 +162,24 @@ void kl_render_draw(kl_model_t *model) {
   glBufferData(GL_UNIFORM_BUFFER, sizeof(uniform_scene_t), &scene, GL_DYNAMIC_DRAW);
   glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
-
   glUseProgram(program_default);
   glBindBufferBase(GL_UNIFORM_BUFFER, program_default_scene, ubo_scene);
+  
+  glUniform1i(program_default_diffuse, 0);
+  glUniform1i(program_default_normal, 1);
+  glUniform1i(program_default_specular, 2);
 
   glBindVertexArray(model->attribs);
   for (int i=0; i < model->mesh_n; i++) {
     kl_mesh_t *mesh = model->mesh + i;
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, mesh->material.diffuse->id);
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, mesh->material.normal->id);
+    glActiveTexture(GL_TEXTURE2);
+    glBindTexture(GL_TEXTURE_2D, mesh->material.specular->id);
+
     glDrawElements(GL_TRIANGLES, 3*mesh->tris_n, GL_UNSIGNED_INT, (void*)(3*mesh->tris_i*sizeof(int)));
   }
   glBindVertexArray(0);
@@ -147,41 +188,73 @@ void kl_render_draw(kl_model_t *model) {
   glUseProgram(0);
 }
 
-int kl_render_upload_vertdata(void *data, int n) {
-  int vbo;
-  glGenBuffers(1, (unsigned int*)&vbo);
+unsigned int kl_render_upload_vertdata(void *data, int n) {
+  unsigned int vbo;
+  glGenBuffers(1, &vbo);
   glBindBuffer(GL_ARRAY_BUFFER, vbo);
   glBufferData(GL_ARRAY_BUFFER, n, data, GL_STATIC_DRAW);
   glBindBuffer(GL_ARRAY_BUFFER, 0);
   return vbo;
 }
 
-int kl_render_upload_tris(int *data, int n) {
-  int ebo;
-  glGenBuffers(1, (unsigned int*)&ebo);
+unsigned int kl_render_upload_tris(int *data, int n) {
+  unsigned int ebo;
+  glGenBuffers(1, &ebo);
   glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
   glBufferData(GL_ELEMENT_ARRAY_BUFFER, n, data, GL_STATIC_DRAW);
   glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
   return ebo;
 }
 
-static int convertenum(int value) {
-  switch (value) {
-    case KL_RENDER_FLOAT:
-      return GL_FLOAT;
-    case KL_RENDER_UINT8:
-      return GL_UNSIGNED_BYTE;
+unsigned int kl_render_upload_texture(void *data, int w, int h, int format, int type) {
+  unsigned int texture;
+  
+  int gltype = convertenum(type);
+  if (gltype == GL_FALSE) {
+    fprintf(stderr, "Render: Bad pixel type! (%x)\n", type);
+    return 0;
   }
-  return KL_RENDER_FLOAT;
+  int glformat = convertenum(format);
+  if (glformat == GL_FALSE) {
+    fprintf(stderr, "Render: Bad texture format! (%x)\n", format);
+    return 0;
+  }
+
+  glGenTextures(1, &texture);
+  glBindTexture(GL_TEXTURE_2D, texture);
+  glTexImage2D(GL_TEXTURE_2D, 0, glformat, w, h, 0, glformat, gltype, data);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+
+  /* greyscale swizzles */
+  switch (format) {
+    case KL_RENDER_GRAYA:
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A, GL_GREEN);
+    case KL_RENDER_GRAY:
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_R, GL_RED);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_G, GL_RED);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_B, GL_RED);
+      break;
+  }
+
+  glBindTexture(GL_TEXTURE_2D, 0);
+
+  return texture;
 }
 
-int kl_render_define_attribs(int tris, kl_render_attrib_t *cfg, int n) {
-  int vao;
-  glGenVertexArrays(1, (unsigned int*)&vao);
+void kl_render_free_texture(unsigned int texture) {
+  glDeleteTextures(1, &texture);
+}
+
+unsigned int kl_render_define_attribs(int tris, kl_render_attrib_t *cfg, int n) {
+  unsigned int vao;
+  glGenVertexArrays(1, &vao);
   glBindVertexArray(vao);
   for (int i=0; i < n; i++) {
     kl_render_attrib_t *c = cfg + i;
-    if (c->index < 0 || c->buffer < 0) continue;
+    if (c->buffer == 0) continue;
     glEnableVertexAttribArray(c->index);
     glBindBuffer(GL_ARRAY_BUFFER, c->buffer);
     glVertexAttribPointer(c->index, c->size, convertenum(c->type), GL_FALSE, 0, 0);

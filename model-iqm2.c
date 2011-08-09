@@ -121,6 +121,7 @@ kl_model_t* kl_model_loadiqm2(uint8_t *data) {
 
   iqm_vertarray_t *vertarrays = (iqm_vertarray_t*)(data + header->vertarray_o);
   iqm_mesh_t *meshes = (iqm_mesh_t*)(data + header->mesh_o);
+  char *text = (char*)(data + header->text_o);
 
   iqm_vertarray_t *va_position = NULL;
   iqm_vertarray_t *va_texcoord = NULL;
@@ -179,12 +180,12 @@ kl_model_t* kl_model_loadiqm2(uint8_t *data) {
 
   kl_model_t *model = malloc(sizeof(kl_model_t) + header->mesh_n * sizeof(kl_mesh_t));
 
-  model->bufs[KL_BUFFER_POSITION] = -1;
-  model->bufs[KL_BUFFER_TEXCOORD] = -1;
-  model->bufs[KL_BUFFER_NORMAL]   = -1;
-  model->bufs[KL_BUFFER_TANGENT]  = -1;
-  model->bufs[KL_BUFFER_BLENDIDX] = -1;
-  model->bufs[KL_BUFFER_BLENDWT]  = -1;
+  model->bufs[KL_BUFFER_POSITION] = 0;
+  model->bufs[KL_BUFFER_TEXCOORD] = 0;
+  model->bufs[KL_BUFFER_NORMAL]   = 0;
+  model->bufs[KL_BUFFER_TANGENT]  = 0;
+  model->bufs[KL_BUFFER_BLENDIDX] = 0;
+  model->bufs[KL_BUFFER_BLENDWT]  = 0;
 
   if (va_position != NULL) {
     void *attr = data + va_position->offset;
@@ -270,7 +271,20 @@ kl_model_t* kl_model_loadiqm2(uint8_t *data) {
   for (int i=0; i < header->mesh_n; i++) {
     iqm_mesh_t *mesh = meshes + i;
     
+    char *path = text + mesh->material_i;
+    char  buf[256];
+    kl_texture_t *diffuse  = kl_texture_incref(path);
+    snprintf(buf, 256, "%s_n", path);
+    kl_texture_t *normal   = kl_texture_incref(buf);
+    snprintf(buf, 256, "%s_s", path);
+    kl_texture_t *specular = kl_texture_incref(buf);
+
     model->mesh[i] = (kl_mesh_t){
+      .material = {
+        .diffuse  = diffuse,
+        .normal   = normal,
+        .specular = specular
+      },
       .tris_i = mesh->tris_i,
       .tris_n = mesh->tris_n
     };

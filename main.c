@@ -6,14 +6,14 @@
 
 #include <stdio.h>
 
-int main() {
+int main(int argc, char **argv) {
   kl_evt_generic_t evt;
 
   if (kl_input_init() < 0) return -1;
   if (kl_vid_init() < 0) return -1;
   if (kl_render_init() < 0) return -1;
 
-  kl_model_t *model = kl_model_load("test_assets/mrfixit.iqm");
+  kl_model_t *model = kl_model_load("test_assets/test.iqm");
   printf("Model pointer: %p\n", model);
 
   for (;;) {
