@@ -18,6 +18,7 @@ int main(int argc, char **argv) {
 
   for (;;) {
     kl_render_draw(model);
+    kl_render_composite();
     kl_vid_swap();
     if (kl_input_poll(&evt)) {
       switch (evt.event.type) {

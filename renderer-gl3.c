@@ -5,6 +5,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <assert.h>
 #define GL3_PROTOTYPES
 #include <GL3/gl3.h>
 
@@ -18,7 +19,7 @@ kl_mat4f_t kl_render_mat_view = {
 };
 kl_mat4f_t kl_render_mat_proj = KL_MAT4F_IDENTITY;
 
-static const char *vshader_default_src =
+static const char *vshader_gbuffer_src =
 "#version 330\n"
 "layout(std140) uniform scene {\n"
 "  mat4 mvmatrix;\n"
@@ -28,9 +29,11 @@ static const char *vshader_default_src =
 "in vec2 vtexcoord;\n"
 "in vec3 vnormal;\n"
 "in vec4 vtangent;\n"
+"smooth out float fdepth;\n"
 "smooth out vec2 ftexcoord;\n"
 "smooth out mat3 tbnmatrix;\n"
 "void main() {\n"
+"  fdepth    = -(mvmatrix * vec4(vposition, 1)).z;\n"
 "  ftexcoord = vtexcoord;\n"
 "\n"
 "  vec3 vbitangent = cross(vnormal, vtangent.xyz) * vtangent.w;\n"
@@ -39,34 +42,108 @@ static const char *vshader_default_src =
 "  gl_Position = mvpmatrix * vec4(vposition, 1);\n"
 "}\n";
 
-static const char *fshader_default_src =
+static const char *fshader_gbuffer_src =
 "#version 330\n"
-"uniform sampler2D diffuse;\n"
-"uniform sampler2D normal;\n"
-"uniform sampler2D specular;\n"
-"smooth in vec2 ftexcoord;\n"
-"smooth in mat3 tbnmatrix;\n"
-"out vec4 color;\n"
+"uniform sampler2D tdiffuse;\n"
+"uniform sampler2D tnormal;\n"
+"uniform sampler2D tspecular;\n"
+"smooth in float fdepth;\n"
+"smooth in vec2  ftexcoord;\n"
+"smooth in mat3  tbnmatrix;\n"
+"out float gdepth;\n"
+"out vec4  gdiffuse;\n"
+"out vec2  gnormal;\n"
+"out vec4  gspecular;\n"
+"out vec4  gemissive;\n"
 "void main() {\n"
-"  vec3 n_local = texture2D(normal, ftexcoord).xyz * 2 - 1;\n"
+"  vec3 n_local = texture2D(tnormal, ftexcoord).xyz * 2 - 1;\n"
 "  vec3 n_world = normalize(tbnmatrix * n_local);\n"
-"  vec4 d = texture2D(diffuse, ftexcoord);\n"
-"  color = d * dot(n_world, normalize(vec3(-2, -1, 1)));\n"
+"\n"
+"  gdepth    = fdepth;\n"
+"  gdiffuse  = texture2D(tdiffuse, ftexcoord);\n"
+"  gnormal   = n_world.xy;\n"
+"  gspecular = texture2D(tspecular, ftexcoord);\n"
+"  gemissive = vec4(0.0, 0.0, 0.0, 1.0);\n"
 "}\n";
 
-static int fshader_default = 0;
-static int vshader_default = 0;
-static int program_default = 0;
-static int program_default_scene    = 0;
-static int program_default_diffuse  = 0;
-static int program_default_normal   = 0;
-static int program_default_specular = 0;
-static int ubo_scene    = 0;
+static const char *vshader_composite_src = 
+"#version 330\n"
+"in vec2 vcoord;\n"
+"smooth out vec2 ftexcoord;\n"
+"void main () {\n"
+"  ftexcoord = vcoord;\n"
+"  gl_Position = vec4(vcoord, 0.0, 1.0);\n"
+"}\n";
+
+static const char *fshader_composite_src =
+"#version 330\n"
+"uniform sampler2D tdepth;\n"
+"uniform sampler2D tdiffuse;\n"
+"uniform sampler2D tnormal;\n"
+"uniform sampler2D tspecular;\n"
+"uniform sampler2D temissive;\n"
+"smooth in vec2 ftexcoord;\n"
+"out vec4 color;\n"
+"void main () {\n"
+""  
+"}\n";
+
+static const char *vshader_blit_src =
+"#version 330\n"
+"uniform vec2 size;\n"
+"uniform vec2 offset;\n"
+"in vec2 vcoord;\n"
+"smooth out vec2 ftexcoord;\n"
+"void main () {\n"
+"  ftexcoord = vcoord;\n"
+"  gl_Position = vec4(vcoord * size + offset, 0.0, 1.0);\n"
+"}\n";
+
+static const char *fshader_blit_src = 
+"#version 330\n"
+"uniform sampler2D image;\n"
+"smooth in vec2 ftexcoord;\n"
+"out vec4 color;\n"
+"void main() {\n"
+"  color = texture2D(image, ftexcoord);\n"
+"}\n";
+
+typedef struct gbuffer {
+  unsigned int fshader;
+  unsigned int vshader;
+  unsigned int program;
+  int uniform_scene;
+  int uniform_tdiffuse;
+  int uniform_tnormal;
+  int uniform_tspecular;
+  unsigned int tex_depth;
+  unsigned int tex_diffuse;
+  unsigned int tex_normal;
+  unsigned int tex_specular;
+  unsigned int tex_emissive;
+  unsigned int rbo_depth;
+  unsigned int fbo_gbuffer;
+} gbuffer_t;
+static gbuffer_t gbuffer_info;
+
+typedef struct blit {
+  unsigned int fshader;
+  unsigned int vshader;
+  unsigned int program;
+  int uniform_image;
+  int uniform_size;
+  int uniform_offset;
+  int vbo_coords;
+  int vbo_tris;
+  int vao;
+} blit_t;
+static blit_t blit_info;
 
 typedef struct uniform_scene {
   kl_mat4f_t mv;
   kl_mat4f_t mvp;
 } uniform_scene_t;
+static unsigned int ubo_scene = 0;
 
 #define LOGBUFFER_SIZE 0x4000
 static char logbuffer[LOGBUFFER_SIZE];
@@ -91,68 +168,207 @@ static int convertenum(int value) {
   return GL_FALSE;
 }
 
+static int create_shader(char *name, int type, const char *src, unsigned int *shader) {
+  int status;
+  int n = strlen(src);
+
+  unsigned int id = glCreateShader(type);
+  *shader = id;
+  glShaderSource(id, 1, &src, &n);
+  glCompileShader(id);
+  glGetShaderiv(id, GL_COMPILE_STATUS, &status);
+  if (status != GL_TRUE) {
+    glGetShaderInfoLog(id, LOGBUFFER_SIZE, NULL, logbuffer);
+    fprintf(stderr, "Render: Failed to compile %s\n\tDetails: %s\n", name, logbuffer);
+    return -1;
+  }
+  return 0;
+}
+
+static int init_gbuffer(gbuffer_t *g, int w, int h) {
+  /* g-buffer format: */
+  /* depth: 32f */
+  /* diffuse: 8 red, 8 blue, 8 green, 8 unused */
+  /* normal: 16f x, 16f y (z reconstructed) */
+  /* specular: 8 red, 8 blue, 8 green, 8 specular exponent */
+  /* emissive: 8 red, 8 blue, 8 green, 8 intensity exponent */
+  
+  glGenTextures(1, &g->tex_depth);
+  glBindTexture(GL_TEXTURE_2D, g->tex_depth);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, w, h, 0, GL_RED, GL_FLOAT, NULL);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_R, GL_RED);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_G, GL_RED);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_B, GL_RED);
+
+  glGenTextures(1, &g->tex_diffuse);
+  glBindTexture(GL_TEXTURE_2D, g->tex_diffuse);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+
+  glGenTextures(1, &g->tex_normal);
+  glBindTexture(GL_TEXTURE_2D, g->tex_normal);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RG16F, w, h, 0, GL_RG, GL_UNSIGNED_SHORT, NULL);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+
+  glGenTextures(1, &g->tex_specular);
+  glBindTexture(GL_TEXTURE_2D, g->tex_specular);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+
+  glGenTextures(1, &g->tex_emissive);
+  glBindTexture(GL_TEXTURE_2D, g->tex_emissive);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+
+  glBindTexture(GL_TEXTURE_2D, 0);
+
+  glGenBuffers(1, &g->rbo_depth);
+  glBindRenderbuffer(GL_RENDERBUFFER, g->rbo_depth);
+  glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, w, h);
+  glBindRenderbuffer(GL_RENDERBUFFER, 0);
+  
+  glGenFramebuffers(1, &g->fbo_gbuffer);
+  glBindFramebuffer(GL_FRAMEBUFFER, g->fbo_gbuffer);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g->tex_depth, 0);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, g->tex_diffuse, 0);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_TEXTURE_2D, g->tex_normal, 0);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT3, GL_TEXTURE_2D, g->tex_specular, 0);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT4, GL_TEXTURE_2D, g->tex_emissive, 0);
+  glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, g->rbo_depth);
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+  if (create_shader("g-buffer vertex shader", GL_VERTEX_SHADER, vshader_gbuffer_src, &g->vshader) < 0) return -1;
+  if (create_shader("g-buffer fragment shader", GL_FRAGMENT_SHADER, fshader_gbuffer_src, &g->fshader) < 0) return -1;
+
+  int status;
+  g->program = glCreateProgram();
+  glAttachShader(g->program, g->vshader);
+  glAttachShader(g->program, g->fshader);
+  glBindAttribLocation(g->program, 0, "vposition");
+  glBindAttribLocation(g->program, 1, "vtexcoord");
+  glBindAttribLocation(g->program, 2, "vnormal");
+  glBindAttribLocation(g->program, 3, "vtangent");
+  glBindAttribLocation(g->program, 4, "vblendidx");
+  glBindAttribLocation(g->program, 5, "vblendwt");
+  glBindFragDataLocation(g->program, 0, "gdepth");
+  glBindFragDataLocation(g->program, 1, "gdiffuse");
+  glBindFragDataLocation(g->program, 2, "gnormal");
+  glBindFragDataLocation(g->program, 3, "gspecular");
+  glBindFragDataLocation(g->program, 4, "gemissive");
+  glLinkProgram(g->program);
+  glGetProgramiv(g->program, GL_LINK_STATUS, &status);
+  if (status != GL_TRUE) {
+    glGetProgramInfoLog(g->program, LOGBUFFER_SIZE, NULL, logbuffer);
+    fprintf(stderr, "Render: Failed to compile gbuffer shader program.\n\tDetails: %s\n", logbuffer);
+    return -1;
+  }
+
+  g->uniform_scene     = glGetUniformBlockIndex(g->program, "scene");
+  g->uniform_tdiffuse  = glGetUniformLocation(g->program, "tdiffuse");
+  g->uniform_tnormal   = glGetUniformLocation(g->program, "tnormal");
+  g->uniform_tspecular = glGetUniformLocation(g->program, "tspecular");
+  return 0;
+}
+
+static int init_blit(blit_t *b) {
+  /* screen blitting shader program */
+  if (create_shader("screen vertex shader", GL_VERTEX_SHADER, vshader_blit_src, &b->vshader) < 0) return -1;
+  if (create_shader("screen fragment shader", GL_FRAGMENT_SHADER, fshader_blit_src, &b->fshader) < 0) return -1;
+
+  int status;
+  b->program = glCreateProgram();
+  glAttachShader(b->program, b->vshader);
+  glAttachShader(b->program, b->fshader);
+  glBindAttribLocation(b->program, 0, "vcoord");
+  glLinkProgram(b->program);
+  glGetProgramiv(b->program, GL_LINK_STATUS, &status);
+  if (status != GL_TRUE) {
+    glGetProgramInfoLog(b->program, LOGBUFFER_SIZE, NULL, logbuffer);
+    fprintf(stderr, "Render: Failed to compile screen shader program.\n\tDetails: %s\n", logbuffer);
+    return -1;
+  }
+  b->uniform_image  = glGetUniformLocation(b->program, "image");
+  b->uniform_size   = glGetUniformLocation(b->program, "size");
+  b->uniform_offset = glGetUniformLocation(b->program, "offset");
+
+  /* create screen blitting VBO/VAO */
+  float verts_rect[8] = {
+    0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f, 0.0f, 1.0f
+  };
+  unsigned int tris_rect[6] = { 0, 1, 2, 0, 2, 3 };
+  b->vbo_coords = kl_render_upload_vertdata(verts_rect, 8*sizeof(float));
+  b->vbo_tris   = kl_render_upload_tris(tris_rect, 6*sizeof(unsigned int));
+
+  kl_render_attrib_t attrib = {
+    .index  = 0,
+    .size   = 2,
+    .type   = KL_RENDER_FLOAT,
+    .buffer = b->vbo_coords
+  };
+  b->vao = kl_render_define_attribs(b->vbo_tris, &attrib, 1);
+  return 0;
+}
+
+static void blit_to_screen(unsigned int texture, float w, float h, float x, float y) {
+  glUseProgram(blit_info.program);
+
+  glUniform1i(blit_info.uniform_image, 0);
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, texture);
+
+  glUniform2f(blit_info.uniform_size, w, h);
+  glUniform2f(blit_info.uniform_offset, x, y);
+
+  glBindVertexArray(blit_info.vao);
+
+  glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0); 
+
+  glBindVertexArray(0);
+
+  glUseProgram(0);
+}
+
+
 int kl_render_init() {
   int w, h;
   kl_vid_size(&w, &h);
 
+  /* Build projection matrix */
   float ratio = (float)w/(float)h;
   kl_mat4f_ortho(&kl_render_mat_proj, -50.0f*ratio, 50.0f*ratio, -50.0f, 50.0f, 50.0f, -50.0f);
-
-  int status, len;
-
-  len = strlen(vshader_default_src);
-  vshader_default = glCreateShader(GL_VERTEX_SHADER);
-  glShaderSource(vshader_default, 1, &vshader_default_src, &len);
-  glCompileShader(vshader_default);
-  glGetShaderiv(vshader_default, GL_COMPILE_STATUS, &status);
-  if (status != GL_TRUE) {
-    glGetShaderInfoLog(vshader_default, LOGBUFFER_SIZE, NULL, logbuffer);
-    fprintf(stderr, "Render: Failed to compile default vertex shader.\n\tDetails: %s\n", logbuffer);
-    return -1;
-  }
-
-  len = strlen(fshader_default_src);
-  fshader_default = glCreateShader(GL_FRAGMENT_SHADER);
-  glShaderSource(fshader_default, 1, &fshader_default_src, &len);;
-  glCompileShader(fshader_default);
-  glGetShaderiv(fshader_default, GL_COMPILE_STATUS, &status);
-  if (status != GL_TRUE) {
-    glGetShaderInfoLog(fshader_default, LOGBUFFER_SIZE, NULL, logbuffer);
-    fprintf(stderr, "Render: Failed to compile default fragment shader.\n\tDetails: %s\n", logbuffer);
-    return -1;
-  }
-
-  program_default = glCreateProgram();
-  glAttachShader(program_default, vshader_default);
-  glAttachShader(program_default, fshader_default);
-  glBindAttribLocation(program_default, 0, "vposition");
-  glBindAttribLocation(program_default, 1, "vtexcoord");
-  glBindAttribLocation(program_default, 2, "vnormal");
-  glBindAttribLocation(program_default, 3, "vtangent");
-  glBindAttribLocation(program_default, 4, "vblendidx");
-  glBindAttribLocation(program_default, 5, "vblendwt");
-  glLinkProgram(program_default);
-  glGetProgramiv(program_default, GL_LINK_STATUS, &status);
-  if (status != GL_TRUE) {
-    glGetProgramInfoLog(program_default, LOGBUFFER_SIZE, NULL, logbuffer);
-    fprintf(stderr, "Render: Failed to compile default shader program.\n\tDetails: %s\n", logbuffer);
-    return -1;
-  }
-
-  program_default_scene    = glGetUniformBlockIndex(program_default, "scene");
-  program_default_diffuse  = glGetUniformLocation(program_default, "diffuse");
-  program_default_normal   = glGetUniformLocation(program_default, "normal");
-  program_default_specular = glGetUniformLocation(program_default, "specular");
 
   glGenBuffers(1, (unsigned int*)&ubo_scene);
 
   glEnable(GL_DEPTH_TEST);
   glDepthFunc(GL_LEQUAL);
 
+  if (init_gbuffer(&gbuffer_info, w, h) < 0) return -1;
+  if (init_blit(&blit_info) < 0) return -1;
+
   return 0;
 }
 
 void kl_render_draw(kl_model_t *model) {
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, gbuffer_info.fbo_gbuffer);
+  unsigned int attachments[] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2, GL_COLOR_ATTACHMENT3, GL_COLOR_ATTACHMENT4};
+  glDrawBuffers(5, attachments);
+
   glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
 
   uniform_scene_t scene;
@@ -162,12 +378,12 @@ void kl_render_draw(kl_model_t *model) {
   glBufferData(GL_UNIFORM_BUFFER, sizeof(uniform_scene_t), &scene, GL_DYNAMIC_DRAW);
   glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
-  glUseProgram(program_default);
-  glBindBufferBase(GL_UNIFORM_BUFFER, program_default_scene, ubo_scene);
+  glUseProgram(gbuffer_info.program);
+  glBindBufferBase(GL_UNIFORM_BUFFER, gbuffer_info.uniform_scene, ubo_scene);
   
-  glUniform1i(program_default_diffuse, 0);
-  glUniform1i(program_default_normal, 1);
-  glUniform1i(program_default_specular, 2);
+  glUniform1i(gbuffer_info.uniform_tdiffuse, 0);
+  glUniform1i(gbuffer_info.uniform_tnormal, 1);
+  glUniform1i(gbuffer_info.uniform_tspecular, 2);
 
   glBindVertexArray(model->attribs);
   for (int i=0; i < model->mesh_n; i++) {
@@ -184,8 +400,20 @@ void kl_render_draw(kl_model_t *model) {
   }
   glBindVertexArray(0);
 
-  glBindBufferBase(GL_UNIFORM_BUFFER, program_default_scene, 0);
+  glBindBufferBase(GL_UNIFORM_BUFFER, gbuffer_info.uniform_scene, 0);
   glUseProgram(0);
+
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+}
+
+
+void kl_render_composite() {
+  glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
+  blit_to_screen(gbuffer_info.tex_depth,    0.4, 0.4, -1.0, -1.0);
+  blit_to_screen(gbuffer_info.tex_diffuse,  0.4, 0.4, -0.6, -1.0);
+  blit_to_screen(gbuffer_info.tex_normal,   0.4, 0.4, -0.2, -1.0);
+  blit_to_screen(gbuffer_info.tex_specular, 0.4, 0.4,  0.2, -1.0);
+  blit_to_screen(gbuffer_info.tex_emissive, 0.4, 0.4,  0.6, -1.0);
 }
 
 unsigned int kl_render_upload_vertdata(void *data, int n) {
@@ -197,7 +425,7 @@ unsigned int kl_render_upload_vertdata(void *data, int n) {
   return vbo;
 }
 
-unsigned int kl_render_upload_tris(int *data, int n) {
+unsigned int kl_render_upload_tris(unsigned int *data, int n) {
   unsigned int ebo;
   glGenBuffers(1, &ebo);
   glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);

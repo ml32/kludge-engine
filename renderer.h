@@ -2,6 +2,7 @@
 #define KL_RENDERER_H
 
 #include "matrix.h"
+#include "model.h"
 
 extern kl_mat4f_t kl_render_mat_view;
 extern kl_mat4f_t kl_render_mat_proj;
@@ -23,9 +24,10 @@ typedef struct kl_render_attrib {
 } kl_render_attrib_t;
 
 int kl_render_init();
-void kl_render_draw();
+void kl_render_draw(kl_model_t *model);
+void kl_render_composite();
 unsigned int kl_render_upload_vertdata(void *data, int n);
-unsigned int kl_render_upload_tris(int *data, int n);
+unsigned int kl_render_upload_tris(unsigned int *data, int n);
 unsigned int kl_render_upload_texture(void *data, int w, int h, int format, int type);
 void kl_render_free_texture(unsigned int texture);
 unsigned int kl_render_define_attribs(int tris, kl_render_attrib_t *cfg, int n);

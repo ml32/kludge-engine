@@ -224,8 +224,8 @@ kl_model_t* kl_model_loadiqm2(uint8_t *data) {
     model->bufs[KL_BUFFER_BLENDWT] = vbo;
   }
   
-  /* Portability issue?: cast from uint32_t* to int* */
-  model->tris = kl_render_upload_tris((int*)(data + header->tris_o), header->tris_n * sizeof(iqm_triangle_t));
+  /* portability issue: assumes uint32_t and unsigned int are equivalent */
+  model->tris = kl_render_upload_tris((unsigned int*)(data + header->tris_o), header->tris_n * sizeof(iqm_triangle_t));
 
   kl_render_attrib_t cfg[6];
   cfg[0] = (kl_render_attrib_t){
