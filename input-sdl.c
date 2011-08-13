@@ -1,11 +1,13 @@
 #include "input.h"
 
 #include "platform-sdl.h"
+#include "vid.h"
 
 #include <SDL/SDL.h>
 
 int kl_input_init() {
   kl_sdl_init();
+  SDL_ShowCursor(SDL_DISABLE);
   return 0;
 }
 
@@ -121,6 +123,9 @@ static int tocode(int sdlcode) {
   return KL_BTN_NONE;
 }
 
+void kl_input_tick() {
+}
+
 int kl_input_poll(kl_evt_generic_t *evt) {
   SDL_Event sdlevt;
   if (SDL_PollEvent(&sdlevt)) {
@@ -128,11 +133,19 @@ int kl_input_poll(kl_evt_generic_t *evt) {
       case SDL_KEYDOWN:
       case SDL_KEYUP:
         evt->event.type   = KL_EVT_BUTTON;
-	evt->button.code  = tocode(sdlevt.key.keysym.sym);
-	evt->button.state = (sdlevt.key.state == SDL_PRESSED);
+        evt->button.code  = tocode(sdlevt.key.keysym.sym);
+        evt->button.state = (sdlevt.key.state == SDL_PRESSED);
+        return 1;
+      case SDL_MOUSEMOTION:
+        evt->event.type   = KL_EVT_MOUSE;
+        evt->mouse.x      = sdlevt.motion.x;
+        evt->mouse.y      = sdlevt.motion.y;
+        evt->mouse.dx     = sdlevt.motion.xrel;
+        evt->mouse.dy     = sdlevt.motion.yrel;
         return 1;
     }
   }
   evt->event.type   = KL_EVT_NONE;
   return 0;
 }
+/* vim: set ts=2 sw=2 et */

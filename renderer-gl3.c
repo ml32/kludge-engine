@@ -9,16 +9,6 @@
 #define GL3_PROTOTYPES
 #include <GL3/gl3.h>
 
-kl_mat4f_t kl_render_mat_view = {
-  .cell = {
-     0.0f,  0.0f,  1.0f, 0.0f,
-     1.0f,  0.0f,  0.0f, 0.0f,
-     0.0f,  1.0f,  0.0f, 0.0f,
-     0.0f,  0.0f,  0.0f, 1.0f
-  }
-};
-kl_mat4f_t kl_render_mat_proj = KL_MAT4F_IDENTITY;
-
 static const char *vshader_gbuffer_src =
 "#version 330\n"
 "layout(std140) uniform scene {\n"
@@ -37,7 +27,7 @@ static const char *vshader_gbuffer_src =
 "  ftexcoord = vtexcoord;\n"
 "\n"
 "  vec3 vbitangent = cross(vnormal, vtangent.xyz) * vtangent.w;\n"
-"  tbnmatrix = mat3(vtangent.xyz, vbitangent, vnormal);\n"
+"  tbnmatrix = mat3(mvmatrix[0].xyz, mvmatrix[1].xyz, mvmatrix[2].xyz) * mat3(vtangent.xyz, vbitangent, vnormal);\n"
 "\n"
 "  gl_Position = mvpmatrix * vec4(vposition, 1);\n"
 "}\n";
@@ -59,7 +49,7 @@ static const char *fshader_gbuffer_src =
 "  vec3 n_local = texture2D(tnormal, ftexcoord).xyz * 2 - 1;\n"
 "  vec3 n_world = normalize(tbnmatrix * n_local);\n"
 "\n"
-"  gdepth    = fdepth;\n"
+"  gdepth    = fdepth/100.0;\n"
 "  gdiffuse  = texture2D(tdiffuse, ftexcoord);\n"
 "  gnormal   = n_world.xy;\n"
 "  gspecular = texture2D(tspecular, ftexcoord);\n"
@@ -186,6 +176,8 @@ static int create_shader(char *name, int type, const char *src, unsigned int *sh
 }
 
 static int init_gbuffer(gbuffer_t *g, int w, int h) {
+  int status;
+
   /* g-buffer format: */
   /* depth: 32f */
   /* diffuse: 8 red, 8 blue, 8 green, 8 unused */
@@ -238,9 +230,9 @@ static int init_gbuffer(gbuffer_t *g, int w, int h) {
 
   glBindTexture(GL_TEXTURE_2D, 0);
 
-  glGenBuffers(1, &g->rbo_depth);
+  glGenRenderbuffers(1, &g->rbo_depth);
   glBindRenderbuffer(GL_RENDERBUFFER, g->rbo_depth);
-  glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, w, h);
+  glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT, w, h);
   glBindRenderbuffer(GL_RENDERBUFFER, 0);
   
   glGenFramebuffers(1, &g->fbo_gbuffer);
@@ -251,12 +243,16 @@ static int init_gbuffer(gbuffer_t *g, int w, int h) {
   glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT3, GL_TEXTURE_2D, g->tex_specular, 0);
   glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT4, GL_TEXTURE_2D, g->tex_emissive, 0);
   glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, g->rbo_depth);
+  status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+  if (status != GL_FRAMEBUFFER_COMPLETE) {
+    fprintf(stderr, "Render: G-buffer is incomplete.\n\tDetails: %x\n", status);
+    return -1;
+  }
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
   if (create_shader("g-buffer vertex shader", GL_VERTEX_SHADER, vshader_gbuffer_src, &g->vshader) < 0) return -1;
   if (create_shader("g-buffer fragment shader", GL_FRAGMENT_SHADER, fshader_gbuffer_src, &g->fshader) < 0) return -1;
 
-  int status;
   g->program = glCreateProgram();
   glAttachShader(g->program, g->vshader);
   glAttachShader(g->program, g->fshader);
@@ -349,14 +345,11 @@ int kl_render_init() {
   int w, h;
   kl_vid_size(&w, &h);
 
-  /* Build projection matrix */
-  float ratio = (float)w/(float)h;
-  kl_mat4f_ortho(&kl_render_mat_proj, -50.0f*ratio, 50.0f*ratio, -50.0f, 50.0f, 50.0f, -50.0f);
-
   glGenBuffers(1, (unsigned int*)&ubo_scene);
 
   glEnable(GL_DEPTH_TEST);
   glDepthFunc(GL_LEQUAL);
+  glDisable(GL_CULL_FACE);
 
   if (init_gbuffer(&gbuffer_info, w, h) < 0) return -1;
   if (init_blit(&blit_info) < 0) return -1;
@@ -364,16 +357,19 @@ int kl_render_init() {
   return 0;
 }
 
-void kl_render_draw(kl_model_t *model) {
+void kl_render_draw(kl_camera_t *cam, kl_model_t *model) {
   glBindFramebuffer(GL_DRAW_FRAMEBUFFER, gbuffer_info.fbo_gbuffer);
   unsigned int attachments[] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2, GL_COLOR_ATTACHMENT3, GL_COLOR_ATTACHMENT4};
   glDrawBuffers(5, attachments);
 
   glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
 
+  kl_mat4f_t view, proj;
+  kl_camera_view(cam, &view);
+  kl_camera_proj(cam, &proj);
   uniform_scene_t scene;
-  scene.mv = kl_render_mat_view;
-  kl_mat4f_mul(&scene.mvp, &kl_render_mat_proj, &kl_render_mat_view);
+  scene.mv = view;
+  kl_mat4f_mul(&scene.mvp, &proj, &view);
   glBindBuffer(GL_UNIFORM_BUFFER, ubo_scene);
   glBufferData(GL_UNIFORM_BUFFER, sizeof(uniform_scene_t), &scene, GL_DYNAMIC_DRAW);
   glBindBuffer(GL_UNIFORM_BUFFER, 0);

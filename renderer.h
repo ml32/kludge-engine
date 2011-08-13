@@ -3,9 +3,7 @@
 
 #include "matrix.h"
 #include "model.h"
-
-extern kl_mat4f_t kl_render_mat_view;
-extern kl_mat4f_t kl_render_mat_proj;
+#include "camera.h"
 
 #define KL_RENDER_FLOAT  0x00
 #define KL_RENDER_UINT8  0x01
@@ -24,7 +22,7 @@ typedef struct kl_render_attrib {
 } kl_render_attrib_t;
 
 int kl_render_init();
-void kl_render_draw(kl_model_t *model);
+void kl_render_draw(kl_camera_t *cam, kl_model_t *model);
 void kl_render_composite();
 unsigned int kl_render_upload_vertdata(void *data, int n);
 unsigned int kl_render_upload_tris(unsigned int *data, int n);

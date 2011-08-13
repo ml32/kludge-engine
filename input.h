@@ -74,6 +74,8 @@ typedef struct kl_evt_mouse {
   kl_evt_t evt;
   int x;
   int y;
+  int dx;
+  int dy;
 } kl_evt_mouse_t;
 
 typedef union kl_evt_generic {
@@ -83,6 +85,8 @@ typedef union kl_evt_generic {
 } kl_evt_generic_t;
 
 int kl_input_init();
+void kl_input_tick();
 int kl_input_poll(kl_evt_generic_t *evt);
 
 #endif /* KL_INPUT_H */
+/* vim: set ts=2 sw=2 et */
