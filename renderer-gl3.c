@@ -37,6 +37,7 @@ static const char *fshader_gbuffer_src =
 "uniform sampler2D tdiffuse;\n"
 "uniform sampler2D tnormal;\n"
 "uniform sampler2D tspecular;\n"
+"uniform sampler2D temissive;\n"
 "smooth in float fdepth;\n"
 "smooth in vec2  ftexcoord;\n"
 "smooth in mat3  tbnmatrix;\n"
@@ -46,14 +47,14 @@ static const char *fshader_gbuffer_src =
 "out vec4  gspecular;\n"
 "out vec4  gemissive;\n"
 "void main() {\n"
-"  vec3 n_local = texture(tnormal, ftexcoord).xyz * 2 - 1;\n"
+"  vec3 n_local = texture(tnormal, ftexcoord).xyz * 2.0 - 1.0;\n"
 "  vec3 n_world = normalize(tbnmatrix * n_local);\n"
 "\n"
 "  gdepth    = fdepth;\n"
 "  gdiffuse  = texture(tdiffuse, ftexcoord);\n"
 "  gnormal   = n_world.xy;\n"
 "  gspecular = texture(tspecular, ftexcoord);\n"
-"  gemissive = vec4(0.0, 0.0, 0.0, 1.0);\n"
+"  gemissive = texture(temissive, ftexcoord);\n"
 "}\n";
 
 static const char *vshader_composite_src = 
@@ -80,9 +81,11 @@ static const char *fshader_composite_src =
 "  vec3 norm;\n"
 "  norm.xy = texture(tnormal, ftexcoord).xy;\n"
 "  norm.z  = 1.0 - dot(norm.xy, norm.xy);\n"
-"  vec4 diff = texture(tdiffuse, ftexcoord);\n"
+"  vec3 diff = texture(tdiffuse, ftexcoord).rgb;\n"
 "  vec4 spec = texture(tspecular, ftexcoord);\n"
-"  color   = luminance * diff * dot(norm, vec3(0.0, 0.0, 1.0)) + luminance * vec4(spec.rgb * pow(dot(norm, vec3(0.0, 0.0, 1.0)), spec.a*16.0), 1.0);\n"
+"  vec4 glow = texture(temissive, ftexcoord);\n"
+"  color.rgb = luminance * diff * dot(norm, vec3(0.0, 0.0, 1.0)) + luminance * spec.rgb * pow(dot(norm, vec3(0.0, 0.0, 1.0)), spec.a*255.0) + glow.rgb * exp2(glow.a * 16.0 - 8.0);\n"
+"  color.a   = 1.0;\n"
 "}\n";
 
 static const char *vshader_tonemap_src = 
@@ -131,6 +134,7 @@ static int gbuffer_uniform_scene;
 static int gbuffer_uniform_tdiffuse;
 static int gbuffer_uniform_tnormal;
 static int gbuffer_uniform_tspecular;
+static int gbuffer_uniform_temissive;
 static unsigned int gbuffer_tex_depth;
 static unsigned int gbuffer_tex_diffuse;
 static unsigned int gbuffer_tex_normal;
@@ -316,6 +320,7 @@ static int init_gbuffer(int w, int h) {
   gbuffer_uniform_tdiffuse  = glGetUniformLocation(gbuffer_program, "tdiffuse");
   gbuffer_uniform_tnormal   = glGetUniformLocation(gbuffer_program, "tnormal");
   gbuffer_uniform_tspecular = glGetUniformLocation(gbuffer_program, "tspecular");
+  gbuffer_uniform_temissive = glGetUniformLocation(gbuffer_program, "temissive");
   return 0;
 }
 
@@ -489,6 +494,7 @@ void kl_render_draw(kl_camera_t *cam, kl_model_t *model) {
   glUniform1i(gbuffer_uniform_tdiffuse, 0);
   glUniform1i(gbuffer_uniform_tnormal, 1);
   glUniform1i(gbuffer_uniform_tspecular, 2);
+  glUniform1i(gbuffer_uniform_temissive, 3);
 
   glBindVertexArray(model->attribs);
   for (int i=0; i < model->mesh_n; i++) {
@@ -500,6 +506,8 @@ void kl_render_draw(kl_camera_t *cam, kl_model_t *model) {
     glBindTexture(GL_TEXTURE_2D, mesh->material.normal->id);
     glActiveTexture(GL_TEXTURE2);
     glBindTexture(GL_TEXTURE_2D, mesh->material.specular->id);
+    glActiveTexture(GL_TEXTURE3);
+    glBindTexture(GL_TEXTURE_2D, mesh->material.emissive->id);
 
     glDrawElements(GL_TRIANGLES, 3*mesh->tris_n, GL_UNSIGNED_INT, (void*)(3*mesh->tris_i*sizeof(int)));
   }

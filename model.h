@@ -14,6 +14,7 @@ typedef struct kl_material {
   kl_texture_t *diffuse;
   kl_texture_t *normal;
   kl_texture_t *specular;
+  kl_texture_t *emissive;
 } kl_material_t;
 
 typedef struct kl_mesh {

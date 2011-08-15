@@ -278,12 +278,15 @@ kl_model_t* kl_model_loadiqm2(uint8_t *data) {
     kl_texture_t *normal   = kl_texture_incref(buf);
     snprintf(buf, 256, "%s_s", path);
     kl_texture_t *specular = kl_texture_incref(buf);
+    snprintf(buf, 256, "%s_e", path);
+    kl_texture_t *emissive = kl_texture_incref(buf);
 
     model->mesh[i] = (kl_mesh_t){
       .material = {
         .diffuse  = diffuse,
         .normal   = normal,
-        .specular = specular
+        .specular = specular,
+        .emissive = emissive
       },
       .tris_i = mesh->tris_i,
       .tris_n = mesh->tris_n
