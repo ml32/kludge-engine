@@ -180,6 +180,8 @@ kl_model_t* kl_model_loadiqm2(uint8_t *data) {
 
   kl_model_t *model = malloc(sizeof(kl_model_t) + header->mesh_n * sizeof(kl_mesh_t));
 
+  model->winding = KL_RENDER_CW;
+
   model->bufs[KL_BUFFER_POSITION] = 0;
   model->bufs[KL_BUFFER_TEXCOORD] = 0;
   model->bufs[KL_BUFFER_NORMAL]   = 0;

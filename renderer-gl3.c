@@ -104,7 +104,7 @@ static const char *fshader_tonemap_src =
 "out vec4 color;\n"
 "void main() {\n"
 "  vec3 c = texture(tcomposite, ftexcoord).rgb;\n"
-"  color = vec4(1.0 / (1.0 + exp(-8.0 * pow(c, vec3(0.82)) + 4.0)) - 0.018, 1.0);\n"
+"  color = vec4(1.0 / (1.0 + exp(-8.0 * pow(c, vec3(0.8)) + 4.0)) - 0.018, 1.0);\n"
 "}\n";
 
 static const char *vshader_blit_src =
@@ -195,6 +195,10 @@ static int convertenum(int value) {
       return GL_RED;
     case KL_RENDER_GRAYA:
       return GL_RG;
+    case KL_RENDER_CW:
+      return GL_CW;
+    case KL_RENDER_CCW:
+      return GL_CCW;
   }
   return GL_FALSE;
 }
@@ -443,9 +447,9 @@ int kl_render_init() {
 
   glEnable(GL_DEPTH_TEST);
   glDepthFunc(GL_LEQUAL);
-  //glEnable(GL_CULL_FACE);
-  //glFrontFace(GL_CCW);
-  //glCullFace(GL_BACK);
+  glEnable(GL_CULL_FACE);
+  glFrontFace(GL_CCW);
+  glCullFace(GL_BACK);
 
   if (init_gbuffer(w, h) < 0) return -1;
   if (init_composite(w, h) < 0) return -1;
@@ -496,6 +500,7 @@ void kl_render_draw(kl_camera_t *cam, kl_model_t *model) {
   glUniform1i(gbuffer_uniform_tspecular, 2);
   glUniform1i(gbuffer_uniform_temissive, 3);
 
+  glFrontFace(convertenum(model->winding));
   glBindVertexArray(model->attribs);
   for (int i=0; i < model->mesh_n; i++) {
     kl_mesh_t *mesh = model->mesh + i;
@@ -512,6 +517,7 @@ void kl_render_draw(kl_camera_t *cam, kl_model_t *model) {
     glDrawElements(GL_TRIANGLES, 3*mesh->tris_n, GL_UNSIGNED_INT, (void*)(3*mesh->tris_i*sizeof(int)));
   }
   glBindVertexArray(0);
+  glFrontFace(GL_CCW);
 
   glBindBufferBase(GL_UNIFORM_BUFFER, gbuffer_uniform_scene, 0);
   glUseProgram(0);

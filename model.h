@@ -23,6 +23,7 @@ typedef struct kl_mesh {
 } kl_mesh_t;
 
 typedef struct kl_model {
+  int          winding;
   unsigned int bufs[6]; /* several vertex buffer objects */
   unsigned int tris;    /* element array buffer */
   unsigned int attribs; /* a vertex array object (or equivalent) */

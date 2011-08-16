@@ -14,6 +14,9 @@
 #define KL_RENDER_GRAY   0x12
 #define KL_RENDER_GRAYA  0x13
 
+#define KL_RENDER_CW     0x20
+#define KL_RENDER_CCW    0x21
+
 typedef struct kl_render_attrib {
   unsigned int index;
   unsigned int size;
