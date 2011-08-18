@@ -24,6 +24,18 @@ typedef struct kl_render_attrib {
   unsigned int buffer;
 } kl_render_attrib_t;
 
+typedef struct kl_render_model {
+  kl_model_t *model;
+  struct kl_render_model *next;
+} kl_render_model_t;
+
+typedef struct kl_render_light {
+  kl_vec3f_t position;
+  float r, g, b;
+  float intensity;
+  struct kl_render_light *next;
+} kl_render_light_t;
+
 int kl_render_init();
 void kl_render_draw(kl_camera_t *cam, kl_model_t *model);
 void kl_render_composite();

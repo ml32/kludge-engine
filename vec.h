@@ -3,6 +3,8 @@
 
 #include <math.h>
 
+/* all operations _should_ be able to accept the same source and destination */
+
 typedef struct kl_vec3f {
   float x, y, z;
 } kl_vec3f_t;
@@ -10,6 +12,22 @@ typedef struct kl_vec3f {
 typedef struct kl_vec4f {
   float x, y, z, w;
 } kl_vec4f_t;
+
+static inline void kl_vec3f_add(kl_vec3f_t *dst, kl_vec3f_t *s1, kl_vec3f_t *s2) {
+  *dst = (kl_vec3f_t){
+    .x = s1->x + s2->x,
+    .y = s1->y + s2->y,
+    .z = s1->z + s2->z
+  };
+}
+
+static inline void kl_vec3f_sub(kl_vec3f_t *dst, kl_vec3f_t *s1, kl_vec3f_t *s2) {
+  *dst = (kl_vec3f_t){
+    .x = s1->x - s2->x,
+    .y = s1->y - s2->y,
+    .z = s1->z - s2->z
+  };
+}
 
 static inline float kl_vec3f_dot(kl_vec3f_t *s1, kl_vec3f_t *s2) {
   return s1->x * s2->x + s1->y * s2->y + s1->z * s2->z;
@@ -33,6 +51,12 @@ static inline void kl_vec3f_scale(kl_vec3f_t *dst, kl_vec3f_t *s1, float scale) 
 
 static inline float kl_vec3f_magnitude(kl_vec3f_t *src) {
   return sqrtf(src->x * src->x + src->y * src->y + src->z * src->z);
+}
+
+static inline float kl_vec3f_dist(kl_vec3f_t *s1, kl_vec3f_t *s2) {
+  kl_vec3f_t diff;
+  kl_vec3f_sub(&diff, s1, s2);
+  return kl_vec3f_magnitude(&diff);
 }
 
 static inline void kl_vec3f_norm(kl_vec3f_t *dst, kl_vec3f_t *src) {

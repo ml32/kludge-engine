@@ -9,11 +9,140 @@
 #define GL3_PROTOTYPES
 #include <GL3/gl3.h>
 
+static const float verts_pointlight_volume = {
+   0.000000, -1.000000,  0.000000,
+   0.723600, -0.447215,  0.525720,
+  -0.276385, -0.447215,  0.850640,
+  -0.894425, -0.447215,  0.000000,
+  -0.276385, -0.447215, -0.850640,
+   0.723600, -0.447215, -0.525720,
+   0.276385,  0.447215,  0.850640,
+  -0.723600,  0.447215,  0.525720,
+  -0.723600,  0.447215, -0.525720,
+   0.276385,  0.447215, -0.850640,
+   0.894425,  0.447215, -0.000000,
+   0.000000,  1.000000, -0.000000,
+   0.425323, -0.850654,  0.309011,
+  -0.162456, -0.850654,  0.499995,
+   0.262869, -0.525738,  0.809012,
+   0.425323, -0.850654, -0.309011,
+   0.850648, -0.525736,  0.000000,
+  -0.525730, -0.850652,  0.000000,
+  -0.688189, -0.525736,  0.499997,
+  -0.162456, -0.850654, -0.499995,
+  -0.688189, -0.525736, -0.499997,
+   0.262869, -0.525738, -0.809012,
+   0.951058, -0.000000, -0.309013,
+   0.951058,  0.000000,  0.309013,
+   0.587786,  0.000000,  0.809017,
+   0.000000,  0.000000,  1.000000,
+  -0.587786,  0.000000,  0.809017,
+  -0.951058,  0.000000,  0.309013,
+  -0.951058, -0.000000, -0.309013,
+  -0.587786, -0.000000, -0.809017,
+   0.000000, -0.000000, -1.000000,
+   0.587786, -0.000000, -0.809017,
+   0.688189,  0.525736,  0.499997,
+  -0.262869,  0.525738,  0.809012,
+  -0.850648,  0.525736, -0.000000,
+  -0.262869,  0.525738, -0.809012,
+   0.688189,  0.525736, -0.499997,
+   0.525730,  0.850652, -0.000000,
+   0.162456,  0.850654,  0.499995,
+  -0.425323,  0.850654,  0.309011,
+  -0.425323,  0.850654, -0.309011,
+   0.162456,  0.850654, -0.499995
+};
+
+static const unsigned int tris_pointlight_volume = {
+  15, 13, 2,
+  13, 15, 14,
+  3,  14, 15,
+  14, 1,  13,
+  17, 2,  13,
+  13, 16, 17,
+  6,  17, 16,
+  13, 1,  16,
+  19, 14, 3,
+  14, 19, 18,
+  4,  18, 19,
+  18, 1,  14,
+  21, 18, 4,
+  18, 21, 20,
+  5,  20, 21,
+  20, 1,  18,
+  22, 20, 5,
+  20, 22, 16,
+  6,  16, 22,
+  16, 1,  20,
+  24, 2,  17,
+  17, 23, 24,
+  11, 24, 23,
+  23, 17, 6,
+  26, 3,  15,
+  15, 25, 26,
+  7,  26, 25,
+  25, 15, 2,
+  28, 4,  19,
+  19, 27, 28,
+  8,  28, 27,
+  27, 19, 3,
+  30, 5,  21,
+  21, 29, 30,
+  9,  30, 29,
+  29, 21, 4,
+  32, 6,  22,
+  22, 31, 32,
+  10, 32, 31,
+  31, 22, 5,
+  33, 24, 11,
+  24, 33, 25,
+  7,  25, 33,
+  25, 2,  24,
+  34, 26, 7,
+  26, 34, 27,
+  8,  27, 34,
+  27, 3,  26,
+  35, 28, 8,
+  28, 35, 29,
+  9,  29, 35,
+  29, 4,  28,
+  36, 30, 9,
+  30, 36, 31,
+  10, 31, 36,
+  31, 5,  30,
+  37, 32, 10,
+  32, 37, 23,
+  11, 23, 37,
+  23, 6,  32,
+  39, 7,  33,
+  33, 38, 39,
+  12, 39, 38,
+  38, 33, 11,
+  40, 8,  34,
+  34, 39, 40,
+  12, 40, 39,
+  39, 34, 7,
+  41, 9,  35,
+  35, 40, 41,
+  12, 41, 40,
+  40, 35, 8,
+  42, 10, 36,
+  36, 41, 42,
+  12, 42, 41,
+  41, 36, 9,
+  38, 11, 37,
+  37, 42, 38,
+  12, 38, 42,
+  42, 37, 10,
+};
+
 static const char *vshader_gbuffer_src =
 "#version 330\n"
 "layout(std140) uniform scene {\n"
 "  mat4 mvmatrix;\n"
 "  mat4 mvpmatrix;\n"
+"  mat4 ipmatrix;\n"
 "};\n"
 "in vec3 vposition;\n"
 "in vec2 vtexcoord;\n"
@@ -57,36 +186,62 @@ static const char *fshader_gbuffer_src =
 "  gemissive = texture(temissive, ftexcoord);\n"
 "}\n";
 
-static const char *vshader_composite_src = 
+static const char *vshader_pointlight_src = 
 "#version 330\n"
-"in vec2 vcoord;\n"
+"layout(std140) uniform scene {\n"
+"  mat4 mvmatrix;\n"
+"  mat4 mvpmatrix;\n"
+"  mat4 ipmatrix;\n"
+"};\n"
+"layout(std140) uniform pointlight {\n"
+"  vec3  position;\n"
+"  vec3  color;\n"
+"  float intensity;\n"
+"};\n"
+"in vec3 vcoord;\n"
 "smooth out vec2 ftexcoord;\n"
 "void main () {\n"
-"  ftexcoord = vcoord;\n"
-"  gl_Position = vec4(vcoord * 2.0 - 1.0, 0.0, 1.0);\n"
+"  float radius = 32.0 / sqrt(intensity);\n"
+"  vec4  coord  = vec4(vcoord * radius, 1.0);\n"
+"  ftexcoord    = (mvmatrix * coord).xy * 0.5 + 0.5;\n"
+"  gl_Position  = mvpmatrix * coord;\n"
 "}\n";
 
-static const char *fshader_composite_src =
+static const char *fshader_pointlight_src =
 "#version 330\n"
+"layout(std140) uniform scene {\n"
+"  mat4 mvmatrix;\n"
+"  mat4 mvpmatrix;\n"
+"  mat4 ipmatrix;\n"
+"};\n"
+"layout(std140) uniform pointlight {\n"
+"  vec3  position;\n"
+"  vec3  color;\n"
+"  float intensity;\n"
+"};\n"
 "uniform sampler2D tdepth;\n"
 "uniform sampler2D tdiffuse;\n"
 "uniform sampler2D tnormal;\n"
 "uniform sampler2D tspecular;\n"
-"uniform sampler2D temissive;\n"
-"smooth in vec2 ftexcoord;\n"
+"smooth in ftexcoord;\n"
 "out vec4 color;\n"
 "void main () {\n"
 "  float depth = texture(tdepth, ftexcoord).r;\n"
-"  float luminance = 1000.0/(depth*depth);\n"
+"  vec3  coord = (ipmatrix * vec4(ftexcoord * 2.0 - 1.0, depth, 1.0)).xyz;\n"
+"  float dist  = distance(position, coord);\n"
+"  float luminance = intensity / (dist * dist);\n"
+""
 "  vec3 norm;\n"
 "  norm.xy = texture(tnormal, ftexcoord).xy;\n"
-"  norm.z  = 1.0 - dot(norm.xy, norm.xy);\n"
+"  norm.z  = sqrt(1.0 - dot(norm.xy, norm.xy));\n"
+""
 "  vec3 diff = texture(tdiffuse, ftexcoord).rgb;\n"
 "  vec4 spec = texture(tspecular, ftexcoord);\n"
-"  vec4 glow = texture(temissive, ftexcoord);\n"
-"  color.rgb = luminance * diff * dot(norm, vec3(0.0, 0.0, 1.0)) + luminance * spec.rgb * pow(dot(norm, vec3(0.0, 0.0, 1.0)), spec.a*255.0) + glow.rgb * exp2(glow.a * 16.0 - 8.0);\n"
+"  color.rgb = luminance * diff * dot(norm, vec3(0.0, 0.0, 1.0)) + luminance * spec.rgb * pow(dot(norm, vec3(0.0, 0.0, 1.0)), spec.a*255.0);\n"
 "  color.a   = 1.0;\n"
 "}\n";
+
+/* to decode rgbe emissive value: glow.rgb * exp2(glow.a * 16.0 - 8.0) */
 
 static const char *vshader_tonemap_src = 
 "#version 330\n"
@@ -143,16 +298,18 @@ static unsigned int gbuffer_tex_emissive;
 static unsigned int gbuffer_rbo_depth;
 static unsigned int gbuffer_fbo;
 
-static unsigned int composite_fshader;
-static unsigned int composite_vshader;
-static unsigned int composite_program;
-static int composite_uniform_tdepth;
-static int composite_uniform_tdiffuse;
-static int composite_uniform_tnormal;
-static int composite_uniform_tspecular;
-static int composite_uniform_temissive;
-static unsigned int composite_tex_color;
-static unsigned int composite_fbo;
+static unsigned int tex_lighting;
+static unsigned int fbo_lighting;
+
+static unsigned int pointlight_fshader;
+static unsigned int pointlight_vshader;
+static unsigned int pointlight_program;
+static int pointlight_uniform_scene;
+static int pointlight_uniform_pointlight;
+static int pointlight_uniform_tdepth;
+static int pointlight_uniform_tdiffuse;
+static int pointlight_uniform_tnormal;
+static int pointlight_uniform_tspecular;
 
 static unsigned int tonemap_fshader;
 static unsigned int tonemap_vshader;
@@ -352,11 +509,11 @@ static int init_blit() {
   return 0;
 }
 
-static int init_composite(int w, int h) {
+static int init_lighting(int w, int h) {
   int status;
 
-  glGenTextures(1, &composite_tex_color);
-  glBindTexture(GL_TEXTURE_2D, composite_tex_color);
+  glGenTextures(1, &tex_lighting);
+  glBindTexture(GL_TEXTURE_2D, tex_lighting);
   glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, w, h, 0, GL_RGBA, GL_FLOAT, NULL);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -364,36 +521,39 @@ static int init_composite(int w, int h) {
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
   glBindTexture(GL_TEXTURE_2D, 0);
 
-  glGenFramebuffers(1, &composite_fbo);
-  glBindFramebuffer(GL_FRAMEBUFFER, composite_fbo);
-  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, composite_tex_color, 0);
+  glGenFramebuffers(1, &fbo_lighting);
+  glBindFramebuffer(GL_FRAMEBUFFER, fbo_lighting);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex_lighting, 0);
   status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
   if (status != GL_FRAMEBUFFER_COMPLETE) {
-    fprintf(stderr, "Render: Composite HDR framebuffer is incomplete.\n\tDetails: %x\n", status);
+    fprintf(stderr, "Render: HDR lighting framebuffer is incomplete.\n\tDetails: %x\n", status);
     return -1;
   }
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
-  if (create_shader("compositing vertex shader", GL_VERTEX_SHADER, vshader_composite_src, &composite_vshader) < 0) return -1;
-  if (create_shader("compositing fragment shader", GL_FRAGMENT_SHADER, fshader_composite_src, &composite_fshader) < 0) return -1;
+  /* point lighting */
+  if (create_shader("compositing vertex shader", GL_VERTEX_SHADER, vshader_pointlight_src, &pointlight_vshader) < 0) return -1;
+  if (create_shader("compositing fragment shader", GL_FRAGMENT_SHADER, fshader_pointlight_src, &pointlight_fshader) < 0) return -1;
 
-  composite_program = glCreateProgram();
-  glAttachShader(composite_program, composite_vshader);
-  glAttachShader(composite_program, composite_fshader);
-  glBindAttribLocation(composite_program, 0, "vcoord");
-  glBindFragDataLocation(composite_program, 0, "color");
-  glLinkProgram(composite_program);
-  glGetProgramiv(composite_program, GL_LINK_STATUS, &status);
+  pointlight_program = glCreateProgram();
+  glAttachShader(pointlight_program, pointlight_vshader);
+  glAttachShader(pointlight_program, pointlight_fshader);
+  glBindAttribLocation(pointlight_program, 0, "vcoord");
+  glBindFragDataLocation(pointlight_program, 0, "color");
+  glLinkProgram(pointlight_program);
+  glGetProgramiv(pointlight_program, GL_LINK_STATUS, &status);
   if (status != GL_TRUE) {
-    glGetProgramInfoLog(composite_program, LOGBUFFER_SIZE, NULL, logbuffer);
+    glGetProgramInfoLog(pointlight_program, LOGBUFFER_SIZE, NULL, logbuffer);
     fprintf(stderr, "Render: Failed to compile compositing shader program.\n\tDetails: %s\n", logbuffer);
     return -1;
   }
-  composite_uniform_tdepth    = glGetUniformLocation(composite_program, "tdepth");
-  composite_uniform_tdiffuse  = glGetUniformLocation(composite_program, "tdiffuse");
-  composite_uniform_tnormal   = glGetUniformLocation(composite_program, "tnormal");
-  composite_uniform_tspecular = glGetUniformLocation(composite_program, "tspecular");
-  composite_uniform_temissive = glGetUniformLocation(composite_program, "temissive");
+  pointlight_uniform_scene      = glGetUniformLocation(pointlight_program, "scene");
+  pointlight_uniform_pointlight = glGetUniformLocation(pointlight_program, "pointlight");
+  pointlight_uniform_tdepth     = glGetUniformLocation(pointlight_program, "tdepth");
+  pointlight_uniform_tdiffuse   = glGetUniformLocation(pointlight_program, "tdiffuse");
+  pointlight_uniform_tnormal    = glGetUniformLocation(pointlight_program, "tnormal");
+  pointlight_uniform_tspecular  = glGetUniformLocation(pointlight_program, "tspecular");
+  pointlight_uniform_temissive  = glGetUniformLocation(pointlight_program, "temissive");
 
   return 0;
 }
@@ -530,31 +690,31 @@ void kl_render_composite() {
   glDisable(GL_DEPTH_TEST);
 
   /* draw HDR composite buffer */
-  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, composite_fbo);
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, pointlight_fbo);
   unsigned int attachments[] = {GL_COLOR_ATTACHMENT0};
   glDrawBuffers(1, attachments);
 
   glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
 
-  glUseProgram(composite_program);
+  glUseProgram(pointlight_program);
 
-  glUniform1i(composite_uniform_tdepth, 0);
+  glUniform1i(pointlight_uniform_tdepth, 0);
   glActiveTexture(GL_TEXTURE0);
   glBindTexture(GL_TEXTURE_2D, gbuffer_tex_depth);
 
-  glUniform1i(composite_uniform_tdiffuse, 1);
+  glUniform1i(pointlight_uniform_tdiffuse, 1);
   glActiveTexture(GL_TEXTURE1);
   glBindTexture(GL_TEXTURE_2D, gbuffer_tex_diffuse);
 
-  glUniform1i(composite_uniform_tnormal, 2);
+  glUniform1i(pointlight_uniform_tnormal, 2);
   glActiveTexture(GL_TEXTURE2);
   glBindTexture(GL_TEXTURE_2D, gbuffer_tex_normal);
 
-  glUniform1i(composite_uniform_tspecular, 3);
+  glUniform1i(pointlight_uniform_tspecular, 3);
   glActiveTexture(GL_TEXTURE3);
   glBindTexture(GL_TEXTURE_2D, gbuffer_tex_specular);
 
-  glUniform1i(composite_uniform_temissive, 4);
+  glUniform1i(pointlight_uniform_temissive, 4);
   glActiveTexture(GL_TEXTURE4);
   glBindTexture(GL_TEXTURE_2D, gbuffer_tex_emissive);
 
@@ -573,7 +733,7 @@ void kl_render_composite() {
 
   glUniform1i(tonemap_uniform_tcomposite, 0);
   glActiveTexture(GL_TEXTURE0);
-  glBindTexture(GL_TEXTURE_2D, composite_tex_color);
+  glBindTexture(GL_TEXTURE_2D, pointlight_tex_color);
 
   glBindVertexArray(vao_rect);
 
