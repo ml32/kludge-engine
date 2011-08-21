@@ -25,7 +25,9 @@ int main(int argc, char **argv) {
     .frustum     = { .w = r, .h = 1.0f, .n = 1.0f, .f = 1000.0f }
   };
   kl_model_t *model = kl_model_load("test_assets/test.iqm");
-  printf("Model pointer: %p\n", model);
+  kl_vec3f_t center = { .x = 0.0f, .y = 0.0f, .z = 0.0f };
+  float      radius = 100.0f;
+  kl_render_add_model(model, &center, radius);
   
   int move_f = 0;
   int move_b = 0;
@@ -72,8 +74,7 @@ int main(int argc, char **argv) {
     };
     kl_camera_local_move(&cam, &offset);
 
-    kl_render_draw(&cam, model);
-    kl_render_composite();
+    kl_render_draw(&cam);
     kl_vid_swap();
   }
 }
