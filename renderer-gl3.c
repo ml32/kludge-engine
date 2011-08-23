@@ -26,7 +26,8 @@ static void blit_to_screen(unsigned int texture, float w, float h, float x, floa
 static unsigned int gbuffer_fshader;
 static unsigned int gbuffer_vshader;
 static unsigned int gbuffer_program;
-static int gbuffer_uniform_scene;
+static int gbuffer_uniform_vmatrix;
+static int gbuffer_uniform_vpmatrix;
 static int gbuffer_uniform_tdiffuse;
 static int gbuffer_uniform_tnormal;
 static int gbuffer_uniform_tspecular;
@@ -36,16 +37,18 @@ static unsigned int gbuffer_tex_diffuse;
 static unsigned int gbuffer_tex_normal;
 static unsigned int gbuffer_tex_specular;
 static unsigned int gbuffer_tex_emissive;
-static unsigned int gbuffer_rbo_depth;
 static unsigned int gbuffer_fbo;
 
+static unsigned int rbo_depth;
 static unsigned int tex_lighting;
 static unsigned int fbo_lighting;
 
 static unsigned int pointlight_fshader;
 static unsigned int pointlight_vshader;
 static unsigned int pointlight_program;
-static int pointlight_uniform_scene;
+static int pointlight_uniform_vmatrix;
+static int pointlight_uniform_vpmatrix;
+static int pointlight_uniform_ivpmatrix;
 static int pointlight_uniform_pointlight;
 static int pointlight_uniform_tdepth;
 static int pointlight_uniform_tdiffuse;
@@ -67,13 +70,11 @@ static int blit_uniform_offset;
 static int vbo_rect_coords;
 static int vbo_rect_tris;
 static int vao_rect;
+static int vbo_sphere_coords;
+static int vbo_sphere_tris;
+static int vao_sphere;
 
-typedef struct uniform_scene {
-  kl_mat4f_t mv;  /* model-view */
-  kl_mat4f_t mvp; /* model-view-projection */
-  kl_mat4f_t ip;  /* inverse projection */
-} uniform_scene_t;
-static unsigned int ubo_scene = 0;
+static unsigned int ubo_light = 0;
 
 #define LOGBUFFER_SIZE 0x4000
 static char logbuffer[LOGBUFFER_SIZE];
@@ -85,16 +86,23 @@ int kl_gl3_init() {
   int w, h;
   kl_vid_size(&w, &h);
 
-  glGenBuffers(1, (unsigned int*)&ubo_scene);
+  glGenBuffers(1, &ubo_light);
 
+  glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
   glEnable(GL_DEPTH_TEST);
   glDepthFunc(GL_LEQUAL);
   glEnable(GL_CULL_FACE);
   glFrontFace(GL_CCW);
   glCullFace(GL_BACK);
 
+  /* create a shared depth renderbuffer */
+  glGenRenderbuffers(1, &rbo_depth);
+  glBindRenderbuffer(GL_RENDERBUFFER, rbo_depth);
+  glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT, w, h);
+  glBindRenderbuffer(GL_RENDERBUFFER, 0);
+
   if (init_gbuffer(w, h) < 0) return -1;
-  //if (init_lighting(w, h) < 0) return -1;
+  if (init_lighting(w, h) < 0) return -1;
   if (init_tonemap() < 0) return -1;
   if (init_blit() < 0) return -1;
 
@@ -106,37 +114,41 @@ int kl_gl3_init() {
   vbo_rect_coords = kl_gl3_upload_vertdata(verts_rect, 8*sizeof(float));
   vbo_rect_tris   = kl_gl3_upload_tris(tris_rect, 6*sizeof(unsigned int));
 
-  kl_render_attrib_t attrib = {
+  kl_render_attrib_t attrib_rect = {
     .index  = 0,
     .size   = 2,
     .type   = KL_RENDER_FLOAT,
     .buffer = vbo_rect_coords
   };
-  vao_rect = kl_gl3_define_attribs(vbo_rect_tris, &attrib, 1);
+  vao_rect = kl_gl3_define_attribs(vbo_rect_tris, &attrib_rect, 1);
+
+  /* create sphere for point lighting */
+  vbo_sphere_coords = kl_gl3_upload_vertdata(verts_sphere, SPHERE_NUMVERTS * 3 * sizeof(float));
+  vbo_sphere_tris   = kl_gl3_upload_tris(tris_sphere, SPHERE_NUMTRIS * 3 * sizeof(unsigned int));
+
+  kl_render_attrib_t attrib_sphere = {
+    .index  = 0,
+    .size   = 3,
+    .type   = KL_RENDER_FLOAT,
+    .buffer = vbo_sphere_coords
+  };
+  vao_sphere = kl_gl3_define_attribs(vbo_sphere_tris, &attrib_sphere, 1);
 
   return 0;
 }
 
-void kl_gl3_begin_pass_gbuffer(kl_camera_t *cam) {
+void kl_gl3_begin_pass_gbuffer(kl_mat4f_t *vmatrix, kl_mat4f_t *vpmatrix) {
   glBindFramebuffer(GL_DRAW_FRAMEBUFFER, gbuffer_fbo);
   unsigned int attachments[] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2, GL_COLOR_ATTACHMENT3, GL_COLOR_ATTACHMENT4};
   glDrawBuffers(5, attachments);
 
   glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
 
-  kl_mat4f_t view, proj;
-  kl_camera_view(cam, &view);
-  kl_camera_proj(cam, &proj);
-  uniform_scene_t scene;
-  scene.mv = view;
-  kl_mat4f_mul(&scene.mvp, &proj, &view);
-  glBindBuffer(GL_UNIFORM_BUFFER, ubo_scene);
-  glBufferData(GL_UNIFORM_BUFFER, sizeof(uniform_scene_t), &scene, GL_DYNAMIC_DRAW);
-  glBindBuffer(GL_UNIFORM_BUFFER, 0);
-
   glUseProgram(gbuffer_program);
-  glBindBufferBase(GL_UNIFORM_BUFFER, gbuffer_uniform_scene, ubo_scene);
   
+  glUniformMatrix4fv(gbuffer_uniform_vmatrix,  1, GL_FALSE, (float*)vmatrix);
+  glUniformMatrix4fv(gbuffer_uniform_vpmatrix, 1, GL_FALSE, (float*)vpmatrix);
+
   glUniform1i(gbuffer_uniform_tdiffuse, 0);
   glUniform1i(gbuffer_uniform_tnormal, 1);
   glUniform1i(gbuffer_uniform_tspecular, 2);
@@ -144,7 +156,6 @@ void kl_gl3_begin_pass_gbuffer(kl_camera_t *cam) {
 }
 
 void kl_gl3_end_pass_gbuffer() {
-  glBindBufferBase(GL_UNIFORM_BUFFER, gbuffer_uniform_scene, 0);
   glUseProgram(0);
 
   glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
@@ -171,18 +182,24 @@ void kl_gl3_draw_pass_gbuffer(kl_model_t *model) {
   glFrontFace(GL_CCW);
 }
 
-void kl_gl3_composite() {
-  glDisable(GL_DEPTH_TEST);
+void kl_gl3_begin_pass_lighting(kl_mat4f_t *vmatrix, kl_mat4f_t *vpmatrix, kl_mat4f_t *ivpmatrix) {
+  glDepthFunc(GL_GREATER);
+  glDepthMask(GL_FALSE); /* disable depth writes */
+  glCullFace(GL_FRONT);
+  glEnable(GL_BLEND);
+  glBlendFunc(GL_ONE, GL_ONE); /* additive blending */
 
-  // draw HDR composite buffer
-  /*
   glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbo_lighting);
   unsigned int attachments[] = {GL_COLOR_ATTACHMENT0};
   glDrawBuffers(1, attachments);
 
-  glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
+  glClear(GL_COLOR_BUFFER_BIT);
 
   glUseProgram(pointlight_program);
+
+  glUniformMatrix4fv(pointlight_uniform_vmatrix,  1, GL_FALSE, (float*)vmatrix);
+  glUniformMatrix4fv(pointlight_uniform_vpmatrix, 1, GL_FALSE, (float*)vpmatrix);
+  glUniformMatrix4fv(pointlight_uniform_ivpmatrix, 1, GL_FALSE, (float*)ivpmatrix);
 
   glUniform1i(pointlight_uniform_tdepth, 0);
   glActiveTexture(GL_TEXTURE0);
@@ -199,26 +216,37 @@ void kl_gl3_composite() {
   glUniform1i(pointlight_uniform_tspecular, 3);
   glActiveTexture(GL_TEXTURE3);
   glBindTexture(GL_TEXTURE_2D, gbuffer_tex_specular);
-  */
 
   //glUniform1i(pointlight_uniform_temissive, 4);
   //glActiveTexture(GL_TEXTURE4);
   //glBindTexture(GL_TEXTURE_2D, gbuffer_tex_emissive);
 
-  /*
-  glBindVertexArray(vao_rect);
+  glBindVertexArray(vao_sphere);
+}
 
-  glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0); 
-
+void kl_gl3_end_pass_lighting() {
   glBindVertexArray(0);
 
   glUseProgram(0);
 
   glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-  */
 
-  /* apply tonemapping */
-  /*
+  glDisable(GL_BLEND);
+  glCullFace(GL_BACK);
+  glDepthMask(GL_TRUE);
+  glDepthFunc(GL_LEQUAL);
+}
+
+void kl_gl3_draw_pass_lighting(kl_render_light_t *light) {
+  //fprintf(stderr, "drawing light: < %f, %f, %f > ( %f, %f, %f ) %f\n", light->position.x, light->position.y, light->position.z, light->r, light->g, light->b, light->intensity);
+
+  glBindBufferBase(GL_UNIFORM_BUFFER, pointlight_uniform_pointlight, ubo_light);
+  glBufferData(GL_UNIFORM_BUFFER, sizeof(kl_render_light_t), light, GL_DYNAMIC_DRAW);
+
+  glDrawElements(GL_TRIANGLES, SPHERE_NUMTRIS * 3, GL_UNSIGNED_INT, 0);
+} 
+
+void kl_gl3_composite() {
   glUseProgram(tonemap_program);
 
   glUniform1i(tonemap_uniform_tcomposite, 0);
@@ -232,16 +260,15 @@ void kl_gl3_composite() {
   glBindVertexArray(0);
 
   glUseProgram(0);
-  */
+}
 
+void kl_gl3_debugtex() {
   /* blit debug images */
   blit_to_screen(gbuffer_tex_depth,    0.4, 0.4, -1.0, -1.0);
   blit_to_screen(gbuffer_tex_diffuse,  0.4, 0.4, -0.6, -1.0);
   blit_to_screen(gbuffer_tex_normal,   0.4, 0.4, -0.2, -1.0);
   blit_to_screen(gbuffer_tex_specular, 0.4, 0.4,  0.2, -1.0);
   blit_to_screen(gbuffer_tex_emissive, 0.4, 0.4,  0.6, -1.0);
-
-  glEnable(GL_DEPTH_TEST);
 }
 
 unsigned int kl_gl3_upload_vertdata(void *data, int n) {
@@ -420,10 +447,6 @@ static int init_gbuffer(int w, int h) {
 
   glBindTexture(GL_TEXTURE_2D, 0);
 
-  glGenRenderbuffers(1, &gbuffer_rbo_depth);
-  glBindRenderbuffer(GL_RENDERBUFFER, gbuffer_rbo_depth);
-  glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT, w, h);
-  glBindRenderbuffer(GL_RENDERBUFFER, 0);
   
   glGenFramebuffers(1, &gbuffer_fbo);
   glBindFramebuffer(GL_FRAMEBUFFER, gbuffer_fbo);
@@ -432,7 +455,7 @@ static int init_gbuffer(int w, int h) {
   glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_TEXTURE_2D, gbuffer_tex_normal, 0);
   glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT3, GL_TEXTURE_2D, gbuffer_tex_specular, 0);
   glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT4, GL_TEXTURE_2D, gbuffer_tex_emissive, 0);
-  glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, gbuffer_rbo_depth);
+  glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, rbo_depth);
   status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
   if (status != GL_FRAMEBUFFER_COMPLETE) {
     fprintf(stderr, "Render: G-buffer is incomplete.\n\tDetails: %x\n", status);
@@ -446,17 +469,6 @@ static int init_gbuffer(int w, int h) {
   gbuffer_program = glCreateProgram();
   glAttachShader(gbuffer_program, gbuffer_vshader);
   glAttachShader(gbuffer_program, gbuffer_fshader);
-  glBindAttribLocation(gbuffer_program, 0, "vposition");
-  glBindAttribLocation(gbuffer_program, 1, "vtexcoord");
-  glBindAttribLocation(gbuffer_program, 2, "vnormal");
-  glBindAttribLocation(gbuffer_program, 3, "vtangent");
-  glBindAttribLocation(gbuffer_program, 4, "vblendidx");
-  glBindAttribLocation(gbuffer_program, 5, "vblendwt");
-  glBindFragDataLocation(gbuffer_program, 0, "gdepth");
-  glBindFragDataLocation(gbuffer_program, 1, "gdiffuse");
-  glBindFragDataLocation(gbuffer_program, 2, "gnormal");
-  glBindFragDataLocation(gbuffer_program, 3, "gspecular");
-  glBindFragDataLocation(gbuffer_program, 4, "gemissive");
   glLinkProgram(gbuffer_program);
   glGetProgramiv(gbuffer_program, GL_LINK_STATUS, &status);
   if (status != GL_TRUE) {
@@ -465,7 +477,8 @@ static int init_gbuffer(int w, int h) {
     return -1;
   }
 
-  gbuffer_uniform_scene     = glGetUniformBlockIndex(gbuffer_program, "scene");
+  gbuffer_uniform_vmatrix   = glGetUniformLocation(gbuffer_program, "vmatrix");
+  gbuffer_uniform_vpmatrix  = glGetUniformLocation(gbuffer_program, "vpmatrix");
   gbuffer_uniform_tdiffuse  = glGetUniformLocation(gbuffer_program, "tdiffuse");
   gbuffer_uniform_tnormal   = glGetUniformLocation(gbuffer_program, "tnormal");
   gbuffer_uniform_tspecular = glGetUniformLocation(gbuffer_program, "tspecular");
@@ -482,7 +495,6 @@ static int init_blit() {
   blit_program = glCreateProgram();
   glAttachShader(blit_program, blit_vshader);
   glAttachShader(blit_program, blit_fshader);
-  glBindAttribLocation(blit_program, 0, "vcoord");
   glLinkProgram(blit_program);
   glGetProgramiv(blit_program, GL_LINK_STATUS, &status);
   if (status != GL_TRUE) {
@@ -512,6 +524,7 @@ static int init_lighting(int w, int h) {
   glGenFramebuffers(1, &fbo_lighting);
   glBindFramebuffer(GL_FRAMEBUFFER, fbo_lighting);
   glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex_lighting, 0);
+  glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, rbo_depth);
   status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
   if (status != GL_FRAMEBUFFER_COMPLETE) {
     fprintf(stderr, "Render: HDR lighting framebuffer is incomplete.\n\tDetails: %x\n", status);
@@ -520,23 +533,24 @@ static int init_lighting(int w, int h) {
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
   /* point lighting */
-  if (create_shader("compositing vertex shader", GL_VERTEX_SHADER, vshader_pointlight_src, &pointlight_vshader) < 0) return -1;
-  if (create_shader("compositing fragment shader", GL_FRAGMENT_SHADER, fshader_pointlight_src, &pointlight_fshader) < 0) return -1;
+  if (create_shader("point lighting vertex shader", GL_VERTEX_SHADER, vshader_pointlight_src, &pointlight_vshader) < 0) return -1;
+  if (create_shader("point lighting fragment shader", GL_FRAGMENT_SHADER, fshader_pointlight_src, &pointlight_fshader) < 0) return -1;
 
   pointlight_program = glCreateProgram();
   glAttachShader(pointlight_program, pointlight_vshader);
   glAttachShader(pointlight_program, pointlight_fshader);
-  glBindAttribLocation(pointlight_program, 0, "vcoord");
-  glBindFragDataLocation(pointlight_program, 0, "color");
   glLinkProgram(pointlight_program);
   glGetProgramiv(pointlight_program, GL_LINK_STATUS, &status);
   if (status != GL_TRUE) {
     glGetProgramInfoLog(pointlight_program, LOGBUFFER_SIZE, NULL, logbuffer);
-    fprintf(stderr, "Render: Failed to compile compositing shader program.\n\tDetails: %s\n", logbuffer);
+    fprintf(stderr, "Render: Failed to compile point lighting shader program.\n\tDetails: %s\n", logbuffer);
     return -1;
   }
-  pointlight_uniform_scene      = glGetUniformLocation(pointlight_program, "scene");
-  pointlight_uniform_pointlight = glGetUniformLocation(pointlight_program, "pointlight");
+
+  pointlight_uniform_pointlight = glGetUniformBlockIndex(pointlight_program, "pointlight");
+  pointlight_uniform_vmatrix    = glGetUniformLocation(pointlight_program, "vmatrix");
+  pointlight_uniform_vpmatrix   = glGetUniformLocation(pointlight_program, "vpmatrix");
+  pointlight_uniform_ivpmatrix  = glGetUniformLocation(pointlight_program, "ivpmatrix");
   pointlight_uniform_tdepth     = glGetUniformLocation(pointlight_program, "tdepth");
   pointlight_uniform_tdiffuse   = glGetUniformLocation(pointlight_program, "tdiffuse");
   pointlight_uniform_tnormal    = glGetUniformLocation(pointlight_program, "tnormal");
@@ -554,7 +568,6 @@ static int init_tonemap() {
   tonemap_program = glCreateProgram();
   glAttachShader(tonemap_program, tonemap_vshader);
   glAttachShader(tonemap_program, tonemap_fshader);
-  glBindAttribLocation(tonemap_program, 0, "vcoord");
   glLinkProgram(tonemap_program);
   glGetProgramiv(tonemap_program, GL_LINK_STATUS, &status);
   if (status != GL_TRUE) {

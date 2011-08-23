@@ -3,18 +3,19 @@
 
 #include "matrix.h"
 
-typedef struct kl_frustum {
-  float w, h, n, f;
-} kl_frustum_t;
-
 typedef struct kl_camera {
   kl_vec3f_t   position;
   kl_quat_t    orientation;
-  kl_frustum_t frustum;
+  float        aspect;
+  float        fov; /* in radians! */
+  float        near, far;
+  kl_mat4f_t   mat_view;
+  kl_mat4f_t   mat_proj;
+  kl_mat4f_t   mat_iview;
+  kl_mat4f_t   mat_iproj;
 } kl_camera_t;
 
-void kl_camera_view(kl_camera_t *cam, kl_mat4f_t *view);
-void kl_camera_proj(kl_camera_t *cam, kl_mat4f_t *proj);
+void kl_camera_update(kl_camera_t *cam); /* updates the view and projection matrices */
 void kl_camera_local_move(kl_camera_t *cam, kl_vec3f_t *offset);
 void kl_camera_local_rotate(kl_camera_t *cam, kl_vec3f_t *ang);
 

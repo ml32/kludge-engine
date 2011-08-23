@@ -25,14 +25,15 @@ typedef struct kl_render_attrib {
 } kl_render_attrib_t;
 
 typedef struct kl_render_light {
-  kl_vec3f_t position;
+  kl_vec4f_t position;
   float r, g, b;
   float intensity;
 } kl_render_light_t;
 
 int kl_render_init();
 void kl_render_draw(kl_camera_t *cam);
-void kl_render_add_model(kl_model_t* model, kl_vec3f_t *center, float radius);
+void kl_render_add_model(kl_model_t *model, kl_vec3f_t *center, float radius);
+void kl_render_add_light(kl_render_light_t *light);
 unsigned int kl_render_upload_vertdata(void *data, int n);
 unsigned int kl_render_upload_tris(unsigned int *data, int n);
 unsigned int kl_render_upload_texture(void *data, int w, int h, int format, int type);

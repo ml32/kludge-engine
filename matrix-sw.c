@@ -50,7 +50,17 @@ void kl_mat4f_rotation(kl_mat4f_t *dst, kl_quat_t *src) {
   };
 }
 
-void kl_mat4f_trans(kl_mat4f_t *dst, kl_vec3f_t *src) {
+void kl_mat4f_transpose(kl_mat4f_t *dst, kl_mat4f_t *src) {
+  kl_mat4f_t temp;
+  for (int i=0; i<4; i++) {
+    for (int j=0; j<4; j++) {
+      temp.cell[i*4+j] = src->cell[j*4+i];
+    }
+  }
+  *dst = temp;
+}
+
+void kl_mat4f_translation(kl_mat4f_t *dst, kl_vec3f_t *src) {
   *dst = (kl_mat4f_t){
     .cell = {
       1.0f,   0.0f,   0.0f,   0.0f,
@@ -71,5 +81,40 @@ void kl_mat4f_frustum(kl_mat4f_t *dst, float l, float r, float b, float t, float
     }
   };
 }
+
+void kl_mat4f_perspective(kl_mat4f_t *dst, float ratio, float fov, float n, float f) {
+  float h = n * tanf(fov / 2.0f);
+  float w = h * ratio;
+  *dst = (kl_mat4f_t){
+    .cell = {
+      1.0f/w, 0.0f,   0.0f,             0.0f,
+      0.0f,   1.0f/h, 0.0f,             0.0f,
+      0.0f,   0.0f,   (f+n)/(n-f),     -1.0f,
+      0.0f,   0.0f,   (2.0f*f*n)/(n-f), 0.0f
+    }
+  };
+}
+
+void kl_mat4f_invperspective(kl_mat4f_t *dst, float ratio, float fov, float n, float f) {
+  float h = n * tanf(fov / 2.0f);
+  float w = h * ratio;
+  *dst = (kl_mat4f_t){
+    .cell = {
+      w,    0.0f,  0.0f, 0.0f,
+      0.0f, h,     0.0f, 0.0f,
+      0.0f, 0.0f,  0.0f, (n-f)/(2.0f*f*n),
+      0.0f, 0.0f, -1.0f, (f+n)/(2.0f*f*n)
+    }
+  };
+}
+
+void kl_mat4f_print(kl_mat4f_t *src) {
+  for (int r=0; r < 4; r++) {
+    printf("[ %6.3f, %6.3f, %6.3f, %6.3f ]\n",
+      src->cell[   r], src->cell[4 +r],
+      src->cell[8 +r], src->cell[12+r]);
+  }
+}
+
 
 /* vim: set ts=2 sw=2 et */

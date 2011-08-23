@@ -17,17 +17,27 @@ int main(int argc, char **argv) {
   
   int w, h;
   kl_vid_size(&w, &h);
-  float r = (float)w/(float)h;
 
   kl_camera_t cam = {
     .position    = { .x = 0.0f, .y = 0.0f, .z = 0.0f },
     .orientation = { .r = 1.0f, .i = 0.0f, .j = 0.0f, .k = 0.0f },
-    .frustum     = { .w = r, .h = 1.0f, .n = 1.0f, .f = 1000.0f }
+    .aspect = (float)w/(float)h,
+    .fov = 1.5708f, /* pi/2 rad or 90 deg */
+    .near = 1.0f,
+    .far  = 1000.0f
   };
   kl_model_t *model = kl_model_load("test_assets/test.iqm");
   kl_vec3f_t center = { .x = 0.0f, .y = 0.0f, .z = 0.0f };
   float      radius = 100.0f;
   kl_render_add_model(model, &center, radius);
+  kl_render_light_t *light = malloc(sizeof(kl_render_light_t));
+  *light = (kl_render_light_t) {
+    .position = { .x = 0.0f, .y = 0.0f, .z = 0.0f, .w = 1.0f }, 
+    .r = 1.0f, .g = 1.0f, .b = 1.0f,
+    .intensity = 100.0f
+  };
+  fprintf(stderr, "adding light: < %f, %f, %f > ( %f, %f, %f ) %f\n", light->position.x, light->position.y, light->position.z, light->r, light->g, light->b, light->intensity);
+  kl_render_add_light(light);
   
   int move_f = 0;
   int move_b = 0;

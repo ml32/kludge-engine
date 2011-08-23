@@ -9,6 +9,7 @@
 static int checkfrustum(kl_bvh_bounds_t *bounds);
 
 static kl_bvh_node_t *bvh_models = NULL;
+static kl_bvh_node_t *bvh_lights = NULL;
 
 /* ------------------------- */
 int kl_render_init() { /* these all seem very unecessary */
@@ -16,10 +17,21 @@ int kl_render_init() { /* these all seem very unecessary */
 }
 
 void kl_render_draw(kl_camera_t *cam) {
-  kl_gl3_begin_pass_gbuffer(cam);
+  kl_camera_update(cam);
+
+  kl_mat4f_t mat_vp;
+  kl_mat4f_mul(&mat_vp, &cam->mat_proj, &cam->mat_view);
+  kl_mat4f_t mat_ivp;
+  kl_mat4f_mul(&mat_ivp, &cam->mat_iview, &cam->mat_iproj);
+
+  kl_gl3_begin_pass_gbuffer(&cam->mat_view, &mat_vp);
   kl_bvh_search(bvh_models, &checkfrustum, (kl_bvh_result_cb)&kl_gl3_draw_pass_gbuffer);
   kl_gl3_end_pass_gbuffer();
+  kl_gl3_begin_pass_lighting(&cam->mat_view, &mat_vp, &mat_ivp);
+  kl_bvh_search(bvh_lights, &checkfrustum, (kl_bvh_result_cb)&kl_gl3_draw_pass_lighting);
+  kl_gl3_end_pass_lighting();
   kl_gl3_composite();
+  kl_gl3_debugtex();
 }
 
 void kl_render_add_model(kl_model_t* model, kl_vec3f_t *center, float radius) {
@@ -28,6 +40,14 @@ void kl_render_add_model(kl_model_t* model, kl_vec3f_t *center, float radius) {
     .radius = radius
   };
   kl_bvh_insert(&bvh_models, &bounds, model);
+}
+
+void kl_render_add_light(kl_render_light_t *light) {
+  kl_bvh_bounds_t bounds = {
+    .center = { .x = light->position.x, .y = light->position.y, .z = light->position.z },
+    .radius = 16.0f * sqrtf(light->intensity) /* 16 * sqrt(intensity) is the distance at which light contribution is less than 1/256 */
+  };
+  kl_bvh_insert(&bvh_lights, &bounds, light);
 }
 
 unsigned int kl_render_upload_vertdata(void *data, int n) {
