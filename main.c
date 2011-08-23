@@ -30,14 +30,20 @@ int main(int argc, char **argv) {
   kl_vec3f_t center = { .x = 0.0f, .y = 0.0f, .z = 0.0f };
   float      radius = 100.0f;
   kl_render_add_model(model, &center, radius);
-  kl_render_light_t *light = malloc(sizeof(kl_render_light_t));
-  *light = (kl_render_light_t) {
-    .position = { .x = 0.0f, .y = 0.0f, .z = 0.0f, .w = 1.0f }, 
-    .r = 1.0f, .g = 1.0f, .b = 1.0f,
-    .intensity = 100.0f
+  kl_render_light_t *light1 = malloc(sizeof(kl_render_light_t));
+  *light1 = (kl_render_light_t) {
+    .position = { .x = 10.0f, .y = -20.0f, .z = 40.0f, .w = 1.0f }, 
+    .r = 1.0f, .g = 0.8f, .b = 0.5f,
+    .intensity = 1000.0f
   };
-  fprintf(stderr, "adding light: < %f, %f, %f > ( %f, %f, %f ) %f\n", light->position.x, light->position.y, light->position.z, light->r, light->g, light->b, light->intensity);
-  kl_render_add_light(light);
+  kl_render_add_light(light1);
+  kl_render_light_t *light2 = malloc(sizeof(kl_render_light_t));
+  *light2 = (kl_render_light_t) {
+    .position = { .x = -10.0f, .y = -30.0f, .z = -10.0f, .w = 1.0f }, 
+    .r = 0.8f, .g = 0.8f, .b = 1.0f,
+    .intensity = 1500.0f
+  };
+  kl_render_add_light(light2);
   
   int move_f = 0;
   int move_b = 0;
