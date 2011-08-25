@@ -6,16 +6,23 @@
 #include "vid.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+
 #define GL3_PROTOTYPES
 #include <GL3/gl3.h>
-
+#define GL_TEXTURE_MAX_ANISOTROPY_EXT     0x84FE
+#define GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT 0x84FF
 
 #include "renderer-gl3-meshdata.c"
 #include "renderer-gl3-shaders.c"
 
+static const float anisotropy = 4.0f;
+
 static int convertenum(int value);
+static int typesize(int value);
+static int channels(int value);
 static int create_shader(char *name, int type, const char *src, unsigned int *shader);
 static int init_gbuffer(int w, int h);
 static int init_blit();
@@ -304,9 +311,41 @@ unsigned int kl_gl3_upload_texture(void *data, int w, int h, int format, int typ
 
   glGenTextures(1, &texture);
   glBindTexture(GL_TEXTURE_2D, texture);
-  glTexImage2D(GL_TEXTURE_2D, 0, glformat, w, h, 0, glformat, gltype, data);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+  assert(type == KL_RENDER_UINT8);
+  int c = channels(format);
+  int bytes = w * h * c * typesize(type);
+  uint8_t *buf = malloc(bytes);
+  memcpy(buf, data, bytes);
+  for (int i=0; ; i++){
+    glTexImage2D(GL_TEXTURE_2D, i, glformat, w, h, 0, glformat, gltype, buf);
+    w >>= 1;
+    h >>= 1;
+    if (w <= 0 || h <= 0) break;
+    for (int y=0; y < h; y++) {
+      for (int x=0; x < w; x++) {
+        int x0 = (2 * x) * c;
+        int x1 = (2 * x + 1) * c;
+        int y0 = (2 * y) * (2 * w) * c;
+        int y1 = (2 * y + 1) * (2 * w) * c;
+        
+        switch (c) {
+          case 4:
+            buf[y*w*c + x*c + 3] = ((int)buf[x0 + y0 + 3] + (int)buf[x0 + y1 + 3] + (int)buf[x1 + y0 + 3] + (int)buf[x1 + y1 + 3]) / 4;
+          case 3:
+            buf[y*w*c + x*c + 2] = ((int)buf[x0 + y0 + 2] + (int)buf[x0 + y1 + 2] + (int)buf[x1 + y0 + 2] + (int)buf[x1 + y1 + 2]) / 4;
+          case 2:
+            buf[y*w*c + x*c + 1] = ((int)buf[x0 + y0 + 1] + (int)buf[x0 + y1 + 1] + (int)buf[x1 + y0 + 1] + (int)buf[x1 + y1 + 1]) / 4;
+          case 1:
+            buf[y*w*c + x*c + 0] = ((int)buf[x0 + y0 + 0] + (int)buf[x0 + y1 + 0] + (int)buf[x1 + y0 + 0] + (int)buf[x1 + y1 + 0]) / 4;
+        }
+      }
+    }
+  }
+  free(buf);
+
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR_MIPMAP_LINEAR);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 
@@ -320,6 +359,8 @@ unsigned int kl_gl3_upload_texture(void *data, int w, int h, int format, int typ
       glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_B, GL_RED);
       break;
   }
+
+  glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, anisotropy);
 
   glBindTexture(GL_TEXTURE_2D, 0);
 
@@ -389,6 +430,32 @@ static int convertenum(int value) {
       return GL_CCW;
   }
   return GL_FALSE;
+}
+
+static int typesize(int value) {
+  switch (value) {
+    case KL_RENDER_FLOAT:
+      return 4;
+    case KL_RENDER_UINT8:
+      return 1;
+    case KL_RENDER_UINT16:
+      return 2;
+  }
+  return 0;
+}
+
+static int channels(int value){
+  switch (value) {
+    case KL_RENDER_RGB:
+      return 3;
+    case KL_RENDER_RGBA:
+      return 4;
+    case KL_RENDER_GRAY:
+      return 1;
+    case KL_RENDER_GRAYA:
+      return 2;
+  }
+  return 0;
 }
 
 static int create_shader(char *name, int type, const char *src, unsigned int *shader) {
