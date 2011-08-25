@@ -30,20 +30,11 @@ int main(int argc, char **argv) {
   kl_vec3f_t center = { .x = 0.0f, .y = 0.0f, .z = 0.0f };
   float      radius = 100.0f;
   kl_render_add_model(model, &center, radius);
-  kl_render_light_t *light1 = malloc(sizeof(kl_render_light_t));
-  *light1 = (kl_render_light_t) {
-    .position = { .x = 10.0f, .y = -20.0f, .z = 40.0f, .w = 1.0f }, 
-    .r = 1.0f, .g = 0.8f, .b = 0.5f,
-    .intensity = 1000.0f
-  };
-  kl_render_add_light(light1);
-  kl_render_light_t *light2 = malloc(sizeof(kl_render_light_t));
-  *light2 = (kl_render_light_t) {
-    .position = { .x = -10.0f, .y = -30.0f, .z = -10.0f, .w = 1.0f }, 
-    .r = 0.8f, .g = 0.8f, .b = 1.0f,
-    .intensity = 1500.0f
-  };
-  kl_render_add_light(light2);
+
+  kl_vec3f_t light1_pos = { .x = 10.0f, .y = -20.0f, .z = 40.0f };
+  kl_render_add_light(&light1_pos, 1.0f, 0.8f, 0.5f, 1000.0f);
+  kl_vec3f_t light2_pos = { .x = -10.0f, .y = -30.0f, .z = -10.0f };
+  kl_render_add_light(&light2_pos, 0.8f, 0.8f, 1.0f, 1500.0f);
   
   int move_f = 0;
   int move_b = 0;

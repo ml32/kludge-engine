@@ -11,6 +11,7 @@ static int checkfrustum(kl_bvh_bounds_t *bounds);
 static kl_bvh_node_t *bvh_models = NULL;
 static kl_bvh_node_t *bvh_lights = NULL;
 
+
 /* ------------------------- */
 int kl_render_init() { /* these all seem very unecessary */
   return kl_gl3_init();
@@ -42,10 +43,12 @@ void kl_render_add_model(kl_model_t* model, kl_vec3f_t *center, float radius) {
   kl_bvh_insert(&bvh_models, &bounds, model);
 }
 
-void kl_render_add_light(kl_render_light_t *light) {
+void kl_render_add_light(kl_vec3f_t *position, float r, float g, float b, float intensity) {
+  unsigned int *light = malloc(sizeof(unsigned int));
+  *light = kl_gl3_upload_light(position, r, g, b, intensity);
   kl_bvh_bounds_t bounds = {
-    .center = { .x = light->position.x, .y = light->position.y, .z = light->position.z },
-    .radius = 16.0f * sqrtf(light->intensity) /* 16 * sqrt(intensity) is the distance at which light contribution is less than 1/256 */
+    .center = { .x = position->x, .y = position->y, .z = position->z },
+    .radius = 16.0f * sqrtf(intensity) /* 16 * sqrt(intensity) is the distance at which light contribution is less than 1/256 */
   };
   kl_bvh_insert(&bvh_lights, &bounds, light);
 }

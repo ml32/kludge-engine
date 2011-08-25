@@ -74,7 +74,11 @@ static int vbo_sphere_coords;
 static int vbo_sphere_tris;
 static int vao_sphere;
 
-static unsigned int ubo_light = 0;
+typedef struct uniform_light {
+  kl_vec4f_t position;
+  float r, g, b;
+  float intensity;
+} uniform_light_t;
 
 #define LOGBUFFER_SIZE 0x4000
 static char logbuffer[LOGBUFFER_SIZE];
@@ -85,8 +89,6 @@ static char logbuffer[LOGBUFFER_SIZE];
 int kl_gl3_init() {
   int w, h;
   kl_vid_size(&w, &h);
-
-  glGenBuffers(1, &ubo_light);
 
   glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
   glEnable(GL_DEPTH_TEST);
@@ -237,11 +239,8 @@ void kl_gl3_end_pass_lighting() {
   glDepthFunc(GL_LEQUAL);
 }
 
-void kl_gl3_draw_pass_lighting(kl_render_light_t *light) {
-  //fprintf(stderr, "drawing light: < %f, %f, %f > ( %f, %f, %f ) %f\n", light->position.x, light->position.y, light->position.z, light->r, light->g, light->b, light->intensity);
-
-  glBindBufferBase(GL_UNIFORM_BUFFER, pointlight_uniform_pointlight, ubo_light);
-  glBufferData(GL_UNIFORM_BUFFER, sizeof(kl_render_light_t), light, GL_DYNAMIC_DRAW);
+void kl_gl3_draw_pass_lighting(unsigned int *light) {
+  glBindBufferBase(GL_UNIFORM_BUFFER, pointlight_uniform_pointlight, *light);
 
   glDrawElements(GL_TRIANGLES, SPHERE_NUMTRIS * 3, GL_UNSIGNED_INT, 0);
 } 
@@ -325,6 +324,23 @@ unsigned int kl_gl3_upload_texture(void *data, int w, int h, int format, int typ
   glBindTexture(GL_TEXTURE_2D, 0);
 
   return texture;
+}
+
+unsigned int kl_gl3_upload_light(kl_vec3f_t *position, float r, float g, float b, float intensity) {
+  unsigned int ubo;
+
+  uniform_light_t light = {
+    .position = { position->x, position->y, position->z, 1.0f },
+    .r = r, .g = g, .b = b, .intensity = intensity
+  };
+  
+  glGenBuffers(1, &ubo);
+
+  glBindBuffer(GL_UNIFORM_BUFFER, ubo);
+  glBufferData(GL_UNIFORM_BUFFER, sizeof(uniform_light_t), &light, GL_DYNAMIC_DRAW);
+  glBindBuffer(GL_UNIFORM_BUFFER, 0);
+
+  return ubo;
 }
 
 void kl_gl3_free_texture(unsigned int texture) {
