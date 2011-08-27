@@ -1,5 +1,5 @@
 CC=gcc
-CFLAGS=-std=c99 -g -pedantic -Wall -I/usr/local/include -Iinclude
+CFLAGS=-std=c99 -g -pg -pedantic -Wall -I/usr/local/include -Iinclude
 LDFLAGS=-L/usr/local/lib -lSDL -lGL -lpng
 OBJS=main.o input-sdl.o vid-sdl.o platform-sdl.o model.o model-iqm2.o camera.o bvhtree.o renderer.o renderer-gl3.o matrix-sw.o quat-sw.o texture.o texture-png.o resource.o
 BINARYNAME=test

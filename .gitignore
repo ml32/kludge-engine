@@ -4,5 +4,6 @@
 *.dll
 
 test
+gmon.out
 test_assets/
 screenshots/
