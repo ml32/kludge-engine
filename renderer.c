@@ -3,10 +3,11 @@
 #include "renderer-gl3.h"
 
 #include "bvhtree.h"
+#include "plane.h"
 
 #include <stdlib.h>
 
-static int checkfrustum(kl_bvh_bounds_t *bounds);
+static int checkfrustum(kl_bvh_bounds_t *bounds, kl_frustum_t *frustum);
 
 static kl_bvh_node_t *bvh_models = NULL;
 static kl_bvh_node_t *bvh_lights = NULL;
@@ -26,10 +27,10 @@ void kl_render_draw(kl_camera_t *cam) {
   kl_mat4f_mul(&mat_ivp, &cam->mat_iview, &cam->mat_iproj);
 
   kl_gl3_begin_pass_gbuffer(&cam->mat_view, &mat_vp);
-  kl_bvh_search(bvh_models, &checkfrustum, (kl_bvh_result_cb)&kl_gl3_draw_pass_gbuffer);
+  kl_bvh_search(bvh_models, (kl_bvh_filter_cb)&checkfrustum, &cam->frustum, (kl_bvh_result_cb)&kl_gl3_draw_pass_gbuffer);
   kl_gl3_end_pass_gbuffer();
   kl_gl3_begin_pass_lighting(&cam->mat_view, &mat_vp, &mat_ivp);
-  kl_bvh_search(bvh_lights, &checkfrustum, (kl_bvh_result_cb)&kl_gl3_draw_pass_lighting);
+  kl_bvh_search(bvh_lights, (kl_bvh_filter_cb)&checkfrustum, &cam->frustum, (kl_bvh_result_cb)&kl_gl3_draw_pass_lighting);
   kl_gl3_end_pass_lighting();
   kl_gl3_composite();
   kl_gl3_debugtex();
@@ -74,7 +75,19 @@ unsigned int kl_render_define_attribs(int tris, kl_render_attrib_t *cfg, int n) 
 }
 
 /* ------------------------- */
-static int checkfrustum(kl_bvh_bounds_t *bounds) {
+static int checkfrustum(kl_bvh_bounds_t *bounds, kl_frustum_t *frustum) {
+  if (kl_plane_dist(&frustum->near, &bounds->center) > bounds->radius)
+    return 0;
+  if (kl_plane_dist(&frustum->far, &bounds->center) > bounds->radius)
+    return 0;
+  if (kl_plane_dist(&frustum->top, &bounds->center) > bounds->radius)
+    return 0;
+  if (kl_plane_dist(&frustum->bottom, &bounds->center) > bounds->radius)
+    return 0;
+  if (kl_plane_dist(&frustum->left, &bounds->center) > bounds->radius)
+    return 0;
+  if (kl_plane_dist(&frustum->right, &bounds->center) > bounds->radius)
+    return 0;
   return 1;
 }
 /* vim: set ts=2 sw=2 et */

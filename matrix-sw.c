@@ -2,6 +2,8 @@
 
 #include "quat.h"
 
+#include <stdio.h>
+
 void kl_mat4f_mul(kl_mat4f_t *dst, kl_mat4f_t *s1, kl_mat4f_t *s2) {
   for (int c=0; c < 4; c++) {
     for (int r=0; r < 4; r++) {

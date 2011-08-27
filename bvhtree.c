@@ -15,18 +15,18 @@ void kl_bvh_insert(kl_bvh_node_t **root, kl_bvh_bounds_t *bounds, void *item) {
   *root = leaf_insert(*root, leaf); 
 }
 
-void kl_bvh_search(kl_bvh_node_t *root, kl_bvh_filter_cb filtercb, kl_bvh_result_cb resultcb) {
+void kl_bvh_search(kl_bvh_node_t *root, kl_bvh_filter_cb filtercb, void *userdata, kl_bvh_result_cb resultcb) {
   if (root == NULL) return;
   
-  if (!filtercb(&root->header.bounds)) return;
+  if (!filtercb(&root->header.bounds, userdata)) return;
 
   switch (root->header.type) {
     case KL_BVH_LEAF:
       resultcb(root->leaf.item);
       return;
     case KL_BVH_BRANCH:
-      kl_bvh_search(root->branch.children[0], filtercb, resultcb);
-      kl_bvh_search(root->branch.children[1], filtercb, resultcb);
+      kl_bvh_search(root->branch.children[0], filtercb, userdata, resultcb);
+      kl_bvh_search(root->branch.children[1], filtercb, userdata, resultcb);
       return;
   }
 }
