@@ -91,7 +91,6 @@ static const char *fshader_pointlight_src =
 "  vec3 diff = texture(tdiffuse, texcoord).rgb;\n"
 "  vec4 spec = texture(tspecular, texcoord);\n"
 "  color.rgb = light.color.rgb * (luminance * diff * dot(norm, dir) + luminance * spec.rgb * pow(max(0.0, (2.0 * norm * dot(norm, dir) - dir).z), spec.a*255.0));\n"
-//"  color.rgb = dir;\n"
 "  color.a   = 1.0;\n"
 //"  color = vec4(light.color.rgb, 1.0);\n"
 "}\n";
@@ -136,4 +135,3 @@ static const char *fshader_blit_src =
 "void main() {\n"
 "  color = texture(image, ftexcoord);\n"
 "}\n";
-

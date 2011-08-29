@@ -61,6 +61,9 @@ static int pointlight_uniform_tdepth;
 static int pointlight_uniform_tdiffuse;
 static int pointlight_uniform_tnormal;
 static int pointlight_uniform_tspecular;
+static unsigned int pointlight_stencil_program;
+static int pointlight_stencil_uniform_vpmatrix;
+static int pointlight_stencil_uniform_pointlight;
 
 static unsigned int tonemap_fshader;
 static unsigned int tonemap_vshader;
@@ -104,10 +107,10 @@ int kl_gl3_init() {
   glFrontFace(GL_CCW);
   glCullFace(GL_BACK);
 
-  /* create a shared depth renderbuffer */
+  /* create shared depth/stencil renderbuffer */
   glGenRenderbuffers(1, &rbo_depth);
   glBindRenderbuffer(GL_RENDERBUFFER, rbo_depth);
-  glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT, w, h);
+  glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, w, h);
   glBindRenderbuffer(GL_RENDERBUFFER, 0);
 
   if (init_gbuffer(w, h) < 0) return -1;
@@ -192,11 +195,11 @@ void kl_gl3_draw_pass_gbuffer(kl_model_t *model) {
 }
 
 void kl_gl3_begin_pass_lighting(kl_mat4f_t *vmatrix, kl_mat4f_t *vpmatrix, kl_mat4f_t *ivpmatrix) {
+  glEnable(GL_STENCIL_TEST);
+  glBlendFunc(GL_ONE, GL_ONE); /* additive blending */
   glDepthFunc(GL_GREATER);
   glDepthMask(GL_FALSE); /* disable depth writes */
   glCullFace(GL_FRONT);
-  glEnable(GL_BLEND);
-  glBlendFunc(GL_ONE, GL_ONE); /* additive blending */
 
   glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbo_lighting);
   unsigned int attachments[] = {GL_COLOR_ATTACHMENT0};
@@ -204,6 +207,7 @@ void kl_gl3_begin_pass_lighting(kl_mat4f_t *vmatrix, kl_mat4f_t *vpmatrix, kl_ma
 
   glClear(GL_COLOR_BUFFER_BIT);
 
+  /* initialize draw pass uniforms */
   glUseProgram(pointlight_program);
 
   glUniformMatrix4fv(pointlight_uniform_vmatrix,  1, GL_FALSE, (float*)vmatrix);
@@ -226,9 +230,10 @@ void kl_gl3_begin_pass_lighting(kl_mat4f_t *vmatrix, kl_mat4f_t *vpmatrix, kl_ma
   glActiveTexture(GL_TEXTURE3);
   glBindTexture(GL_TEXTURE_2D, gbuffer_tex_specular);
 
-  //glUniform1i(pointlight_uniform_temissive, 4);
-  //glActiveTexture(GL_TEXTURE4);
-  //glBindTexture(GL_TEXTURE_2D, gbuffer_tex_emissive);
+  /* initialize stencil pass uniforms */
+  glUseProgram(pointlight_stencil_program);
+
+  glUniformMatrix4fv(pointlight_stencil_uniform_vpmatrix, 1, GL_FALSE, (float*)vpmatrix);
 
   glBindVertexArray(vao_sphere);
 }
@@ -240,16 +245,46 @@ void kl_gl3_end_pass_lighting() {
 
   glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
 
-  glDisable(GL_BLEND);
   glCullFace(GL_BACK);
   glDepthMask(GL_TRUE);
   glDepthFunc(GL_LEQUAL);
+  glDisable(GL_STENCIL_TEST);
 }
 
 void kl_gl3_draw_pass_lighting(unsigned int *light) {
+  /* stencil pass */
+  glUseProgram(pointlight_stencil_program);
+
+  glClear(GL_STENCIL_BUFFER_BIT);
+
+  glDisable(GL_CULL_FACE);
+  glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+  glStencilFunc(GL_ALWAYS, 0, 0xFF);
+  glStencilOp(GL_KEEP, GL_KEEP, GL_INVERT);
+
+  glBindBufferBase(GL_UNIFORM_BUFFER, pointlight_stencil_uniform_pointlight, *light);
+
+  glDrawElements(GL_TRIANGLES, SPHERE_NUMTRIS * 3, GL_UNSIGNED_INT, 0);
+
+  glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+  glEnable(GL_CULL_FACE);
+
+  /* draw pass */
+  glUseProgram(pointlight_program);
+
+  glEnable(GL_BLEND);
+  glDisable(GL_DEPTH_TEST);
+  glStencilMask(0x00);
+  glStencilFunc(GL_NOTEQUAL, 0, 0xFF);
+  glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+
   glBindBufferBase(GL_UNIFORM_BUFFER, pointlight_uniform_pointlight, *light);
 
   glDrawElements(GL_TRIANGLES, SPHERE_NUMTRIS * 3, GL_UNSIGNED_INT, 0);
+
+  glStencilMask(0xFF);
+  glEnable(GL_DEPTH_TEST);
+  glDisable(GL_BLEND);
 } 
 
 void kl_gl3_composite() {
@@ -607,7 +642,7 @@ static int init_lighting(int w, int h) {
   glGenFramebuffers(1, &fbo_lighting);
   glBindFramebuffer(GL_FRAMEBUFFER, fbo_lighting);
   glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex_lighting, 0);
-  glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, rbo_depth);
+  glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, rbo_depth);
   status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
   if (status != GL_FRAMEBUFFER_COMPLETE) {
     fprintf(stderr, "Render: HDR lighting framebuffer is incomplete.\n\tDetails: %x\n", status);
@@ -630,6 +665,7 @@ static int init_lighting(int w, int h) {
     return -1;
   }
 
+
   pointlight_uniform_pointlight = glGetUniformBlockIndex(pointlight_program, "pointlight");
   pointlight_uniform_vmatrix    = glGetUniformLocation(pointlight_program, "vmatrix");
   pointlight_uniform_vpmatrix   = glGetUniformLocation(pointlight_program, "vpmatrix");
@@ -638,7 +674,20 @@ static int init_lighting(int w, int h) {
   pointlight_uniform_tdiffuse   = glGetUniformLocation(pointlight_program, "tdiffuse");
   pointlight_uniform_tnormal    = glGetUniformLocation(pointlight_program, "tnormal");
   pointlight_uniform_tspecular  = glGetUniformLocation(pointlight_program, "tspecular");
-  //pointlight_uniform_temissive  = glGetUniformLocation(pointlight_program, "temissive");
+
+  /* the stencil pass program is the same, but without fragment processing */
+  pointlight_stencil_program = glCreateProgram();
+  glAttachShader(pointlight_stencil_program, pointlight_vshader);
+  glLinkProgram(pointlight_stencil_program);
+  glGetProgramiv(pointlight_stencil_program, GL_LINK_STATUS, &status);
+  if (status != GL_TRUE) {
+    glGetProgramInfoLog(pointlight_stencil_program, LOGBUFFER_SIZE, NULL, logbuffer);
+    fprintf(stderr, "Render: Failed to compile point lighting (stencil pass) shader program.\n\tDetails: %s\n", logbuffer);
+    return -1;
+  }
+
+  pointlight_stencil_uniform_pointlight = glGetUniformBlockIndex(pointlight_stencil_program, "pointlight");
+  pointlight_stencil_uniform_vpmatrix   = glGetUniformLocation(pointlight_stencil_program, "vpmatrix");
 
   return 0;
 }
