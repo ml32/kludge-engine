@@ -2,6 +2,7 @@
 #define KL_MODEL_H
 
 #include "texture.h"
+#include "sphere.h"
 
 #define KL_BUFFER_POSITION 0x00
 #define KL_BUFFER_TEXCOORD 0x01
@@ -23,6 +24,7 @@ typedef struct kl_mesh {
 } kl_mesh_t;
 
 typedef struct kl_model {
+  kl_sphere_t  bounds;
   int          winding;
   unsigned int bufs[6]; /* several vertex buffer objects */
   unsigned int tris;    /* element array buffer */

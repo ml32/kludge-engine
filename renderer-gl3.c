@@ -305,11 +305,11 @@ void kl_gl3_composite() {
 
 void kl_gl3_debugtex() {
   /* blit debug images */
-  blit_to_screen(gbuffer_tex_depth,    0.4, 0.4, -1.0, -1.0);
-  blit_to_screen(gbuffer_tex_diffuse,  0.4, 0.4, -0.6, -1.0);
-  blit_to_screen(gbuffer_tex_normal,   0.4, 0.4, -0.2, -1.0);
-  blit_to_screen(gbuffer_tex_specular, 0.4, 0.4,  0.2, -1.0);
-  blit_to_screen(gbuffer_tex_emissive, 0.4, 0.4,  0.6, -1.0);
+  blit_to_screen(gbuffer_tex_depth,    0.34, 0.34, -0.95, -0.95);
+  blit_to_screen(gbuffer_tex_diffuse,  0.34, 0.34, -0.56, -0.95);
+  blit_to_screen(gbuffer_tex_normal,   0.34, 0.34, -0.17, -0.95);
+  blit_to_screen(gbuffer_tex_specular, 0.34, 0.34,  0.22, -0.95);
+  blit_to_screen(gbuffer_tex_emissive, 0.34, 0.34,  0.61, -0.95);
 }
 
 unsigned int kl_gl3_upload_vertdata(void *data, int n) {

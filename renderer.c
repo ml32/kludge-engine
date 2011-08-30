@@ -4,10 +4,11 @@
 
 #include "bvhtree.h"
 #include "plane.h"
+#include "sphere.h"
 
 #include <stdlib.h>
 
-static int checkfrustum(kl_bvh_bounds_t *bounds, kl_frustum_t *frustum);
+static int checkfrustum(kl_sphere_t *bounds, kl_frustum_t *frustum);
 
 static kl_bvh_node_t *bvh_models = NULL;
 static kl_bvh_node_t *bvh_lights = NULL;
@@ -36,18 +37,14 @@ void kl_render_draw(kl_camera_t *cam) {
   kl_gl3_debugtex();
 }
 
-void kl_render_add_model(kl_model_t* model, kl_vec3f_t *center, float radius) {
-  kl_bvh_bounds_t bounds = {
-    .center = *center,
-    .radius = radius
-  };
-  kl_bvh_insert(&bvh_models, &bounds, model);
+void kl_render_add_model(kl_model_t* model) {
+  kl_bvh_insert(&bvh_models, &model->bounds, model);
 }
 
 void kl_render_add_light(kl_vec3f_t *position, float r, float g, float b, float intensity) {
   unsigned int *light = malloc(sizeof(unsigned int));
   *light = kl_gl3_upload_light(position, r, g, b, intensity);
-  kl_bvh_bounds_t bounds = {
+  kl_sphere_t bounds = {
     .center = { .x = position->x, .y = position->y, .z = position->z },
     .radius = 16.0f * sqrtf(intensity) /* 16 * sqrt(intensity) is the distance at which light contribution is less than 1/256 */
   };
@@ -75,7 +72,7 @@ unsigned int kl_render_define_attribs(int tris, kl_render_attrib_t *cfg, int n) 
 }
 
 /* ------------------------- */
-static int checkfrustum(kl_bvh_bounds_t *bounds, kl_frustum_t *frustum) {
+static int checkfrustum(kl_sphere_t *bounds, kl_frustum_t *frustum) {
   if (kl_plane_dist(&frustum->near, &bounds->center) > bounds->radius)
     return 0;
   if (kl_plane_dist(&frustum->far, &bounds->center) > bounds->radius)

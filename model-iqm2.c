@@ -180,6 +180,7 @@ kl_model_t* kl_model_loadiqm2(uint8_t *data) {
 
   kl_model_t *model = malloc(sizeof(kl_model_t) + header->mesh_n * sizeof(kl_mesh_t));
 
+  kl_sphere_bounds(&model->bounds, (kl_vec3f_t*)(data + va_position->offset), header->vert_n);
   model->winding = KL_RENDER_CW;
 
   model->bufs[KL_BUFFER_POSITION] = 0;

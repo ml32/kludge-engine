@@ -27,9 +27,7 @@ int main(int argc, char **argv) {
     .far  = 1000.0f
   };
   kl_model_t *model = kl_model_load("test_assets/test.iqm");
-  kl_vec3f_t center = { .x = 0.0f, .y = 0.0f, .z = 0.0f };
-  float      radius = 100.0f;
-  kl_render_add_model(model, &center, radius);
+  kl_render_add_model(model);
 
   kl_vec3f_t light1_pos = { .x = 10.0f, .y = -20.0f, .z = 40.0f };
   kl_render_add_light(&light1_pos, 1.0f, 0.8f, 0.5f, 1000.0f);
