@@ -46,7 +46,7 @@ static void update_proj(kl_camera_t *cam) {
 }
 
 static void update_frustum(kl_camera_t *cam) {
-  kl_vec3f_t forward_local  = { .x = 0.0f, .y = 0.0f, .z =  1.0f };
+  kl_vec3f_t forward_local  = { .x = 0.0f, .y = 0.0f, .z = -1.0f };
   kl_vec3f_t forward_world, backward_world;
   kl_quat_rotate(&forward_world, &cam->orientation, &forward_local);
   kl_vec3f_negate(&backward_world, &forward_world);
@@ -68,22 +68,22 @@ static void update_frustum(kl_camera_t *cam) {
   kl_vec3f_t top_local = {
     .x = 0.0f,
     .y = y,
-    .z = -yz
+    .z = yz
   };
   kl_vec3f_t bottom_local = {
     .x = 0.0f,
     .y = -y,
-    .z = -yz
+    .z = yz
   };
   kl_vec3f_t left_local = {
     .x = -x,
     .y = 0.0f,
-    .z = -xz
+    .z = xz
   };
   kl_vec3f_t right_local = {
     .x = x,
     .y = 0.0f,
-    .z = -xz
+    .z = xz
   };
   kl_vec3f_t top_world, bottom_world, left_world, right_world;
   kl_quat_rotate(&top_world, &cam->orientation, &top_local);

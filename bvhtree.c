@@ -30,6 +30,17 @@ void kl_bvh_search(kl_bvh_node_t *root, kl_bvh_filter_cb filtercb, void *filter_
   }
 }
 
+void kl_bvh_debug(kl_bvh_node_t* root, kl_bvh_debug_cb debugcb, void *userdata) {
+  if (root == NULL) return;
+  
+  debugcb(root, userdata);
+
+  if (root->header.type == KL_BVH_BRANCH) {
+      kl_bvh_debug(root->branch.children[0], debugcb, userdata);
+      kl_bvh_debug(root->branch.children[1], debugcb, userdata);
+  }
+}
+
 
 /* --------------------------- */
  

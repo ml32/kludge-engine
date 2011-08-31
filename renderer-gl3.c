@@ -56,6 +56,12 @@ static unsigned int minimal_vshader;
 static unsigned int minimal_program;
 static int minimal_uniform_mvpmatrix;
 
+/* flat color shader */
+static unsigned int flatcolor_fshader;
+static unsigned int flatcolor_program;
+static int flatcolor_uniform_mvpmatrix;
+static int flatcolor_uniform_color;
+
 static unsigned int pointlight_fshader;
 static unsigned int pointlight_vshader;
 static unsigned int pointlight_program;
@@ -308,7 +314,40 @@ void kl_gl3_draw_pass_lighting(kl_mat4f_t *mvpmatrix, unsigned int light) {
 
   glStencilMask(0xFF);
   glDisable(GL_BLEND);
-} 
+}
+
+void kl_gl3_begin_pass_debug() {
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbo_lighting);
+  unsigned int attachments[] = {GL_COLOR_ATTACHMENT0};
+  glDrawBuffers(1, attachments);
+
+  glEnable(GL_DEPTH_TEST);
+  glDepthFunc(GL_LEQUAL);
+
+  //glClear(GL_DEPTH_BUFFER_BIT);
+
+  glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+
+  glUseProgram(flatcolor_program);
+  glBindVertexArray(vao_sphere);
+}
+
+void kl_gl3_end_pass_debug() {
+  glBindVertexArray(0);
+
+  glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+
+  glDisable(GL_DEPTH_TEST);
+
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+}
+
+void kl_gl3_draw_pass_debug(kl_mat4f_t *mvpmatrix, float r, float g, float b) {
+  glUniformMatrix4fv(flatcolor_uniform_mvpmatrix, 1, GL_FALSE, (float*)mvpmatrix);
+  glUniform3f(flatcolor_uniform_color, r, g, b);
+
+  glDrawElements(GL_TRIANGLES, SPHERE_NUMTRIS * 3, GL_UNSIGNED_INT, 0);
+}
 
 void kl_gl3_composite() {
   glUseProgram(tonemap_program);
@@ -673,6 +712,22 @@ static int init_minimal() {
   }
 
   minimal_uniform_mvpmatrix = glGetUniformLocation(minimal_program, "mvpmatrix");
+
+  if (create_shader("flat color fragment shader", GL_FRAGMENT_SHADER, fshader_flatcolor_src, &flatcolor_fshader) < 0) return -1;
+
+  flatcolor_program = glCreateProgram();
+  glAttachShader(flatcolor_program, minimal_vshader);
+  glAttachShader(flatcolor_program, flatcolor_fshader);
+  glLinkProgram(flatcolor_program);
+  glGetProgramiv(flatcolor_program, GL_LINK_STATUS, &status);
+  if (status != GL_TRUE) {
+    glGetProgramInfoLog(flatcolor_program, LOGBUFFER_SIZE, NULL, logbuffer);
+    fprintf(stderr, "Render: Failed to compile flat color shader program.\n\tDetails: %s\n", logbuffer);
+    return -1;
+  }
+
+  flatcolor_uniform_mvpmatrix = glGetUniformLocation(flatcolor_program, "mvpmatrix");
+  flatcolor_uniform_color     = glGetUniformLocation(flatcolor_program, "color");
 
   return 0;
 }

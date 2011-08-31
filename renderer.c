@@ -17,6 +17,7 @@ typedef struct light {
 static int checkfrustum(kl_sphere_t *bounds, kl_frustum_t *frustum);
 static void draw_model(kl_model_t *model, void *_);
 static void draw_light(light_t *light, kl_mat4f_t *mat_vp);
+static void draw_bounds(kl_bvh_node_t *node, kl_mat4f_t *mat_vp);
 
 static kl_bvh_node_t *bvh_models = NULL;
 static kl_bvh_node_t *bvh_lights = NULL;
@@ -35,10 +36,18 @@ void kl_render_draw(kl_camera_t *cam) {
   kl_gl3_begin_pass_gbuffer(&cam->mat_view, &mat_vp);
   kl_bvh_search(bvh_models, (kl_bvh_filter_cb)&checkfrustum, &cam->frustum, (kl_bvh_result_cb)&draw_model, NULL);
   kl_gl3_end_pass_gbuffer();
+
   kl_gl3_begin_pass_lighting(&cam->mat_view, &cam->position, cam->quad_rays);
   kl_bvh_search(bvh_lights, (kl_bvh_filter_cb)&checkfrustum, &cam->frustum, (kl_bvh_result_cb)&draw_light, &mat_vp);
   kl_gl3_end_pass_lighting();
+
+  kl_gl3_begin_pass_debug();
+  kl_bvh_debug(bvh_models, (kl_bvh_debug_cb)&draw_bounds, &mat_vp);
+  kl_bvh_debug(bvh_lights, (kl_bvh_debug_cb)&draw_bounds, &mat_vp);
+  kl_gl3_end_pass_debug();
+
   kl_gl3_composite();
+
   kl_gl3_debugtex();
 }
 
@@ -112,6 +121,32 @@ static void draw_light(light_t *light, kl_mat4f_t *mat_vp) {
   kl_mat4f_mul(&mat_mvp, mat_vp, &mat_model);
 
   kl_gl3_draw_pass_lighting(&mat_mvp, light->id);
+}
+
+static void draw_bounds(kl_bvh_node_t *node, kl_mat4f_t *mat_vp) {
+  static float colors[] = {
+    0.25f, 1.0f, 0.0f,
+    1.0f,  0.5f, 0.0f,
+    0.0f,  1.0f, 0.5f,
+    0.5f,  0.0f, 1.0f,
+  };
+  static int colori = 0;
+
+  float r = colors[3*colori + 0];
+  float g = colors[3*colori + 1];
+  float b = colors[3*colori + 2];
+  colori = (colori + 1) % 4;;
+
+  kl_vec3f_t position = node->header.bounds.center;
+  float      radius   = node->header.bounds.radius;
+
+  kl_mat4f_t scale, translation, mat_model, mat_mvp;
+  kl_mat4f_translation(&translation, &position);
+  kl_mat4f_scale(&scale, radius, radius, radius);
+  kl_mat4f_mul(&mat_model, &translation, &scale);
+  kl_mat4f_mul(&mat_mvp, mat_vp, &mat_model);
+
+  kl_gl3_draw_pass_debug(&mat_mvp, r, g, b);
 }
 
 /* vim: set ts=2 sw=2 et */

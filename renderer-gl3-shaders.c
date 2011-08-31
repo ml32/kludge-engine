@@ -53,6 +53,14 @@ static const char *vshader_minimal_src =
 "  gl_Position  = mvpmatrix * vec4(vcoord, 1.0);\n"
 "}\n";
 
+static const char *fshader_flatcolor_src = 
+"#version 330\n"
+"uniform vec3 color;\n"
+"layout(location = 0) out vec4 outcolor;\n"
+"void main() {\n"
+"  outcolor = vec4(color, 1.0);\n"
+"}\n";
+
 static const char *vshader_pointlight_src = 
 "#version 330\n"
 "layout(location = 0) in vec2 vcoord;\n"

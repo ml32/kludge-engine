@@ -16,6 +16,10 @@ void kl_gl3_begin_pass_lighting(kl_mat4f_t *vmatrix, kl_vec3f_t *viewpos, kl_vec
 void kl_gl3_end_pass_lighting();
 void kl_gl3_draw_pass_lighting(kl_mat4f_t *mvpmatrix, unsigned int light);
 
+void kl_gl3_begin_pass_debug();
+void kl_gl3_end_pass_debug();
+void kl_gl3_draw_pass_debug(kl_mat4f_t *mvpmatrix, float r, float g, float b);
+
 void kl_gl3_composite(); /* apply tonemapping, postprocessing, and output to screen */
 void kl_gl3_debugtex(); /* show output of the g-buffer */
 
