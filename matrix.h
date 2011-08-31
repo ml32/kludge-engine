@@ -27,8 +27,9 @@ void kl_mat4f_frustum(kl_mat4f_t *dst, float l, float r, float b, float t, float
 void kl_mat4f_perspective(kl_mat4f_t *dst, float ratio, float fov, float n, float f);
 void kl_mat4f_invperspective(kl_mat4f_t *dst, float ratio, float fov, float n, float f);
 void kl_mat4f_rotation(kl_mat4f_t *dst, kl_quat_t *src);
-void kl_mat4f_transpose(kl_mat4f_t *dst, kl_mat4f_t *src);
 void kl_mat4f_translation(kl_mat4f_t *dst, kl_vec3f_t *src);
+void kl_mat4f_scale(kl_mat4f_t *dst, float x, float y, float z);
+void kl_mat4f_transpose(kl_mat4f_t *dst, kl_mat4f_t *src);
 void kl_mat4f_print(kl_mat4f_t *src);
 
 #endif /* KL_MATRIX_H */

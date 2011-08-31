@@ -26,9 +26,14 @@ static int channels(int value);
 static int create_shader(char *name, int type, const char *src, unsigned int *shader);
 static int init_gbuffer(int w, int h);
 static int init_blit();
+static int init_minimal();
 static int init_lighting(int w, int h);
 static int init_tonemap();
 static void blit_to_screen(unsigned int texture, float w, float h, float x, float y);
+
+static unsigned int rbo_depth;
+static unsigned int tex_lighting;
+static unsigned int fbo_lighting;
 
 static unsigned int gbuffer_fshader;
 static unsigned int gbuffer_vshader;
@@ -46,24 +51,21 @@ static unsigned int gbuffer_tex_specular;
 static unsigned int gbuffer_tex_emissive;
 static unsigned int gbuffer_fbo;
 
-static unsigned int rbo_depth;
-static unsigned int tex_lighting;
-static unsigned int fbo_lighting;
+/* "minimal" shader program with no fragment output (used for stencil masks) */
+static unsigned int minimal_vshader;
+static unsigned int minimal_program;
+static int minimal_uniform_mvpmatrix;
 
 static unsigned int pointlight_fshader;
 static unsigned int pointlight_vshader;
 static unsigned int pointlight_program;
-static int pointlight_uniform_vmatrix;
-static int pointlight_uniform_vpmatrix;
-static int pointlight_uniform_ivpmatrix;
 static int pointlight_uniform_pointlight;
+static int pointlight_uniform_vmatrix;
 static int pointlight_uniform_tdepth;
 static int pointlight_uniform_tdiffuse;
 static int pointlight_uniform_tnormal;
 static int pointlight_uniform_tspecular;
-static unsigned int pointlight_stencil_program;
-static int pointlight_stencil_uniform_vpmatrix;
-static int pointlight_stencil_uniform_pointlight;
+static int pointlight_uniform_viewpos;
 
 static unsigned int tonemap_fshader;
 static unsigned int tonemap_vshader;
@@ -76,10 +78,15 @@ static unsigned int blit_program;
 static int blit_uniform_image;
 static int blit_uniform_size;
 static int blit_uniform_offset;
-  
-static int vbo_rect_coords;
-static int vbo_rect_tris;
-static int vao_rect;
+
+/* full-screen quad (NDC coordinates) */
+static int vbo_quad_coords;
+static int vbo_quad_tris;
+static int vao_quad;
+/* "perspective" quad (quad with perspective rays) */
+static int vbo_pquad_rays;
+static int vao_pquad; 
+/* low-resolution sphere for light stenciling */
 static int vbo_sphere_coords;
 static int vbo_sphere_tris;
 static int vao_sphere;
@@ -101,11 +108,6 @@ int kl_gl3_init() {
   kl_vid_size(&w, &h);
 
   glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-  glEnable(GL_DEPTH_TEST);
-  glDepthFunc(GL_LEQUAL);
-  glEnable(GL_CULL_FACE);
-  glFrontFace(GL_CCW);
-  glCullFace(GL_BACK);
 
   /* create shared depth/stencil renderbuffer */
   glGenRenderbuffers(1, &rbo_depth);
@@ -114,25 +116,43 @@ int kl_gl3_init() {
   glBindRenderbuffer(GL_RENDERBUFFER, 0);
 
   if (init_gbuffer(w, h) < 0) return -1;
+  if (init_minimal() < 0) return -1;
   if (init_lighting(w, h) < 0) return -1;
   if (init_tonemap() < 0) return -1;
   if (init_blit() < 0) return -1;
 
-  /* create screen blitting VBO/VAO */
+  /* create fullscreen quad VBO/VAO */
   float verts_rect[8] = {
-    0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f, 0.0f, 1.0f
+    -1.0f, -1.0f, 1.0f, -1.0f, 1.0f, 1.0f, -1.0f, 1.0f
   };
   unsigned int tris_rect[6] = { 0, 1, 2, 0, 2, 3 };
-  vbo_rect_coords = kl_gl3_upload_vertdata(verts_rect, 8*sizeof(float));
-  vbo_rect_tris   = kl_gl3_upload_tris(tris_rect, 6*sizeof(unsigned int));
+  vbo_quad_coords = kl_gl3_upload_vertdata(verts_rect, 8*sizeof(float));
+  vbo_quad_tris   = kl_gl3_upload_tris(tris_rect, 6*sizeof(unsigned int));
 
-  kl_render_attrib_t attrib_rect = {
+  kl_render_attrib_t attrib_quad = {
     .index  = 0,
     .size   = 2,
     .type   = KL_RENDER_FLOAT,
-    .buffer = vbo_rect_coords
+    .buffer = vbo_quad_coords
   };
-  vao_rect = kl_gl3_define_attribs(vbo_rect_tris, &attrib_rect, 1);
+  vao_quad = kl_gl3_define_attribs(vbo_quad_tris, &attrib_quad, 1);
+
+  vbo_pquad_rays = kl_gl3_upload_vertdata(NULL, 0);
+  kl_render_attrib_t attrib_pquad[2] = {
+    {
+      .index  = 0,
+      .size   = 2,
+      .type   = KL_RENDER_FLOAT,
+      .buffer = vbo_quad_coords
+    },
+    {
+      .index  = 1,
+      .size   = 3,
+      .type   = KL_RENDER_FLOAT,
+      .buffer = vbo_pquad_rays
+    }
+  };
+  vao_pquad = kl_gl3_define_attribs(vbo_quad_tris, attrib_pquad, 2);
 
   /* create sphere for point lighting */
   vbo_sphere_coords = kl_gl3_upload_vertdata(verts_sphere, SPHERE_NUMVERTS * 3 * sizeof(float));
@@ -150,6 +170,11 @@ int kl_gl3_init() {
 }
 
 void kl_gl3_begin_pass_gbuffer(kl_mat4f_t *vmatrix, kl_mat4f_t *vpmatrix) {
+  glEnable(GL_CULL_FACE);
+  glCullFace(GL_BACK);
+  glEnable(GL_DEPTH_TEST);
+  glDepthFunc(GL_LEQUAL);
+
   glBindFramebuffer(GL_DRAW_FRAMEBUFFER, gbuffer_fbo);
   unsigned int attachments[] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2, GL_COLOR_ATTACHMENT3, GL_COLOR_ATTACHMENT4};
   glDrawBuffers(5, attachments);
@@ -171,6 +196,9 @@ void kl_gl3_end_pass_gbuffer() {
   glUseProgram(0);
 
   glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+
+  glDisable(GL_DEPTH_TEST);
+  glDisable(GL_CULL_FACE);
 }
 
 void kl_gl3_draw_pass_gbuffer(kl_model_t *model) {
@@ -194,10 +222,9 @@ void kl_gl3_draw_pass_gbuffer(kl_model_t *model) {
   glFrontFace(GL_CCW);
 }
 
-void kl_gl3_begin_pass_lighting(kl_mat4f_t *vmatrix, kl_mat4f_t *vpmatrix, kl_mat4f_t *ivpmatrix) {
+void kl_gl3_begin_pass_lighting(kl_mat4f_t *vmatrix, kl_vec3f_t *viewpos, kl_vec3f_t *rays) {
   glEnable(GL_STENCIL_TEST);
   glBlendFunc(GL_ONE, GL_ONE); /* additive blending */
-  glDepthFunc(GL_GREATER);
   glDepthMask(GL_FALSE); /* disable depth writes */
   glCullFace(GL_FRONT);
 
@@ -210,9 +237,7 @@ void kl_gl3_begin_pass_lighting(kl_mat4f_t *vmatrix, kl_mat4f_t *vpmatrix, kl_ma
   /* initialize draw pass uniforms */
   glUseProgram(pointlight_program);
 
-  glUniformMatrix4fv(pointlight_uniform_vmatrix,  1, GL_FALSE, (float*)vmatrix);
-  glUniformMatrix4fv(pointlight_uniform_vpmatrix, 1, GL_FALSE, (float*)vpmatrix);
-  glUniformMatrix4fv(pointlight_uniform_ivpmatrix, 1, GL_FALSE, (float*)ivpmatrix);
+  glUniformMatrix4fv(pointlight_uniform_vmatrix, 1, GL_FALSE, (float*)vmatrix);
 
   glUniform1i(pointlight_uniform_tdepth, 0);
   glActiveTexture(GL_TEXTURE0);
@@ -230,12 +255,10 @@ void kl_gl3_begin_pass_lighting(kl_mat4f_t *vmatrix, kl_mat4f_t *vpmatrix, kl_ma
   glActiveTexture(GL_TEXTURE3);
   glBindTexture(GL_TEXTURE_2D, gbuffer_tex_specular);
 
-  /* initialize stencil pass uniforms */
-  glUseProgram(pointlight_stencil_program);
+  glUniform3fv(pointlight_uniform_viewpos, 1, (float*)viewpos);
 
-  glUniformMatrix4fv(pointlight_stencil_uniform_vpmatrix, 1, GL_FALSE, (float*)vpmatrix);
-
-  glBindVertexArray(vao_sphere);
+  /* update perspective quad rays */
+  kl_gl3_update_vertdata(vbo_pquad_rays, rays, 4*sizeof(kl_vec3f_t));
 }
 
 void kl_gl3_end_pass_lighting() {
@@ -247,43 +270,43 @@ void kl_gl3_end_pass_lighting() {
 
   glCullFace(GL_BACK);
   glDepthMask(GL_TRUE);
-  glDepthFunc(GL_LEQUAL);
   glDisable(GL_STENCIL_TEST);
 }
 
-void kl_gl3_draw_pass_lighting(unsigned int *light) {
+void kl_gl3_draw_pass_lighting(kl_mat4f_t *mvpmatrix, unsigned int light) {
   /* stencil pass */
-  glUseProgram(pointlight_stencil_program);
+  glUseProgram(minimal_program);
 
   glClear(GL_STENCIL_BUFFER_BIT);
 
-  glDisable(GL_CULL_FACE);
+  glEnable(GL_DEPTH_TEST);
+  glDepthFunc(GL_GREATER);
   glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
   glStencilFunc(GL_ALWAYS, 0, 0xFF);
   glStencilOp(GL_KEEP, GL_KEEP, GL_INVERT);
 
-  glBindBufferBase(GL_UNIFORM_BUFFER, pointlight_stencil_uniform_pointlight, *light);
+  glUniformMatrix4fv(minimal_uniform_mvpmatrix, 1, GL_FALSE, (float*)mvpmatrix);
 
+  glBindVertexArray(vao_sphere);
   glDrawElements(GL_TRIANGLES, SPHERE_NUMTRIS * 3, GL_UNSIGNED_INT, 0);
 
   glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-  glEnable(GL_CULL_FACE);
+  glDisable(GL_DEPTH_TEST);
 
   /* draw pass */
   glUseProgram(pointlight_program);
 
   glEnable(GL_BLEND);
-  glDisable(GL_DEPTH_TEST);
   glStencilMask(0x00);
   glStencilFunc(GL_NOTEQUAL, 0, 0xFF);
   glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
 
-  glBindBufferBase(GL_UNIFORM_BUFFER, pointlight_uniform_pointlight, *light);
+  glBindBufferBase(GL_UNIFORM_BUFFER, pointlight_uniform_pointlight, light);
 
-  glDrawElements(GL_TRIANGLES, SPHERE_NUMTRIS * 3, GL_UNSIGNED_INT, 0);
+  glBindVertexArray(vao_pquad);
+  glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 
   glStencilMask(0xFF);
-  glEnable(GL_DEPTH_TEST);
   glDisable(GL_BLEND);
 } 
 
@@ -294,7 +317,7 @@ void kl_gl3_composite() {
   glActiveTexture(GL_TEXTURE0);
   glBindTexture(GL_TEXTURE_2D, tex_lighting);
 
-  glBindVertexArray(vao_rect);
+  glBindVertexArray(vao_quad);
 
   glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0); 
 
@@ -305,20 +328,28 @@ void kl_gl3_composite() {
 
 void kl_gl3_debugtex() {
   /* blit debug images */
-  blit_to_screen(gbuffer_tex_depth,    0.34, 0.34, -0.95, -0.95);
-  blit_to_screen(gbuffer_tex_diffuse,  0.34, 0.34, -0.56, -0.95);
-  blit_to_screen(gbuffer_tex_normal,   0.34, 0.34, -0.17, -0.95);
-  blit_to_screen(gbuffer_tex_specular, 0.34, 0.34,  0.22, -0.95);
-  blit_to_screen(gbuffer_tex_emissive, 0.34, 0.34,  0.61, -0.95);
+  blit_to_screen(gbuffer_tex_depth,    0.2, 0.2, -0.8, -0.8);
+  blit_to_screen(gbuffer_tex_diffuse,  0.2, 0.2, -0.4, -0.8);
+  blit_to_screen(gbuffer_tex_normal,   0.2, 0.2, -0.0, -0.8);
+  blit_to_screen(gbuffer_tex_specular, 0.2, 0.2,  0.4, -0.8);
+  blit_to_screen(gbuffer_tex_emissive, 0.2, 0.2,  0.8, -0.8);
 }
 
 unsigned int kl_gl3_upload_vertdata(void *data, int n) {
   unsigned int vbo;
   glGenBuffers(1, &vbo);
-  glBindBuffer(GL_ARRAY_BUFFER, vbo);
-  glBufferData(GL_ARRAY_BUFFER, n, data, GL_STATIC_DRAW);
-  glBindBuffer(GL_ARRAY_BUFFER, 0);
+  if (data != NULL) {
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER, n, data, GL_STATIC_DRAW);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+  }
   return vbo;
+}
+
+void kl_gl3_update_vertdata(unsigned int vbo, void *data, int n) {
+  glBindBuffer(GL_ARRAY_BUFFER, vbo);
+  glBufferData(GL_ARRAY_BUFFER, n, data, GL_DYNAMIC_DRAW);
+  glBindBuffer(GL_ARRAY_BUFFER, 0);
 }
 
 unsigned int kl_gl3_upload_tris(unsigned int *data, int n) {
@@ -439,7 +470,6 @@ unsigned int kl_gl3_define_attribs(int tris, kl_render_attrib_t *cfg, int n) {
   glBindVertexArray(0);
   return vao;
 }
-
 
 /* --------------------------------------*/
 
@@ -627,6 +657,26 @@ static int init_blit() {
   return 0;
 }
 
+static int init_minimal() {
+  int status;
+
+  if (create_shader("minimal vertex shader", GL_VERTEX_SHADER, vshader_minimal_src, &minimal_vshader) < 0) return -1;
+ 
+  minimal_program = glCreateProgram();
+  glAttachShader(minimal_program, minimal_vshader);
+  glLinkProgram(minimal_program);
+  glGetProgramiv(minimal_program, GL_LINK_STATUS, &status);
+  if (status != GL_TRUE) {
+    glGetProgramInfoLog(minimal_program, LOGBUFFER_SIZE, NULL, logbuffer);
+    fprintf(stderr, "Render: Failed to compile minimal shader program.\n\tDetails: %s\n", logbuffer);
+    return -1;
+  }
+
+  minimal_uniform_mvpmatrix = glGetUniformLocation(minimal_program, "mvpmatrix");
+
+  return 0;
+}
+
 static int init_lighting(int w, int h) {
   int status;
 
@@ -665,29 +715,13 @@ static int init_lighting(int w, int h) {
     return -1;
   }
 
-
   pointlight_uniform_pointlight = glGetUniformBlockIndex(pointlight_program, "pointlight");
   pointlight_uniform_vmatrix    = glGetUniformLocation(pointlight_program, "vmatrix");
-  pointlight_uniform_vpmatrix   = glGetUniformLocation(pointlight_program, "vpmatrix");
-  pointlight_uniform_ivpmatrix  = glGetUniformLocation(pointlight_program, "ivpmatrix");
   pointlight_uniform_tdepth     = glGetUniformLocation(pointlight_program, "tdepth");
   pointlight_uniform_tdiffuse   = glGetUniformLocation(pointlight_program, "tdiffuse");
   pointlight_uniform_tnormal    = glGetUniformLocation(pointlight_program, "tnormal");
   pointlight_uniform_tspecular  = glGetUniformLocation(pointlight_program, "tspecular");
-
-  /* the stencil pass program is the same, but without fragment processing */
-  pointlight_stencil_program = glCreateProgram();
-  glAttachShader(pointlight_stencil_program, pointlight_vshader);
-  glLinkProgram(pointlight_stencil_program);
-  glGetProgramiv(pointlight_stencil_program, GL_LINK_STATUS, &status);
-  if (status != GL_TRUE) {
-    glGetProgramInfoLog(pointlight_stencil_program, LOGBUFFER_SIZE, NULL, logbuffer);
-    fprintf(stderr, "Render: Failed to compile point lighting (stencil pass) shader program.\n\tDetails: %s\n", logbuffer);
-    return -1;
-  }
-
-  pointlight_stencil_uniform_pointlight = glGetUniformBlockIndex(pointlight_stencil_program, "pointlight");
-  pointlight_stencil_uniform_vpmatrix   = glGetUniformLocation(pointlight_stencil_program, "vpmatrix");
+  pointlight_uniform_viewpos    = glGetUniformLocation(pointlight_program, "viewpos");
 
   return 0;
 }
@@ -722,7 +756,7 @@ static void blit_to_screen(unsigned int texture, float w, float h, float x, floa
   glUniform2f(blit_uniform_size, w, h);
   glUniform2f(blit_uniform_offset, x, y);
 
-  glBindVertexArray(vao_rect);
+  glBindVertexArray(vao_quad);
 
   glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0); 
 
@@ -730,4 +764,5 @@ static void blit_to_screen(unsigned int texture, float w, float h, float x, floa
 
   glUseProgram(0);
 }
+
 /* vim: set ts=2 sw=2 et */

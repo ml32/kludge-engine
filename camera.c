@@ -3,20 +3,20 @@
 static void update_view(kl_camera_t *cam);
 static void update_proj(kl_camera_t *cam);
 static void update_frustum(kl_camera_t *cam);
+static void update_rays(kl_camera_t *cam);
 
 /* ------------------- */
 void kl_camera_update(kl_camera_t *cam) {
   update_view(cam);
   update_proj(cam);
   update_frustum(cam);
+  update_rays(cam);
 }
 
 void kl_camera_local_move(kl_camera_t *cam, kl_vec3f_t *offset) {
-  kl_vec3f_t temp;
-  kl_quat_rotate(&temp, &cam->orientation, offset);
-  cam->position.x += temp.x;
-  cam->position.y += temp.y;
-  cam->position.z += temp.z;
+  kl_vec3f_t offset_world;
+  kl_quat_rotate(&offset_world, &cam->orientation, offset);
+  kl_vec3f_add(&cam->position, &cam->position, &offset_world);
 }
 
 void kl_camera_local_rotate(kl_camera_t *cam, kl_vec3f_t *ang) {
@@ -30,19 +30,14 @@ void kl_camera_local_rotate(kl_camera_t *cam, kl_vec3f_t *ang) {
 
 /* ---------------------- */
 static void update_view(kl_camera_t *cam) {
-  kl_mat4f_t rot, trans;
-  kl_mat4f_rotation(&rot, &cam->orientation);
-  kl_mat4f_translation(&trans, &cam->position);
-
-  kl_mat4f_mul(&cam->mat_view, &rot, &trans);
-
-  kl_mat4f_t irot, itrans;
-  kl_mat4f_transpose(&irot, &rot);
   kl_vec3f_t ipos;
   kl_vec3f_negate(&ipos, &cam->position);
-  kl_mat4f_translation(&itrans, &ipos);
 
-  kl_mat4f_mul(&cam->mat_iview, &itrans, &irot);
+  kl_mat4f_t rot, trans;
+  kl_mat4f_rotation(&rot, &cam->orientation);
+  kl_mat4f_translation(&trans, &ipos);
+
+  kl_mat4f_mul(&cam->mat_view, &rot, &trans);
 }
 
 static void update_proj(kl_camera_t *cam) {
@@ -121,5 +116,36 @@ static void update_frustum(kl_camera_t *cam) {
     .left   = left,
     .right  = right
   };
+}
+
+static void update_rays(kl_camera_t *cam) {
+  float dy  = tanf(cam->fov / 2.0f);
+  float dx  = cam->aspect * dy;
+  kl_vec3f_t local[4] = {
+    {
+      .x = -dx,
+      .y = -dy,
+      .z = -1.0f
+    },
+    {
+      .x =  dx,
+      .y = -dy,
+      .z = -1.0f
+    },
+    {
+      .x =  dx,
+      .y =  dy,
+      .z = -1.0f
+    },
+    {
+      .x = -dx,
+      .y =  dy,
+      .z = -1.0f
+    }
+  };
+  for (int i=0; i < 4; i++) {
+    kl_quat_rotate(&cam->quad_rays[i], &cam->orientation, &local[i]);
+    //cam->quad_rays[i] = local[i];
+  }
 }
 /* vim: set ts=2 sw=2 et */

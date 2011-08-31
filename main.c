@@ -73,9 +73,9 @@ int main(int argc, char **argv) {
     kl_camera_local_rotate(&cam, &mouseangle);
     
     kl_vec3f_t offset = {
-      .x = (move_l ? 0.2f : 0.0f) - (move_r ? 0.2f : 0.0f),
+      .x = (move_r ? 0.2f : 0.0f) - (move_l ? 0.2f : 0.0f),
       .y = 0.0f,
-      .z = (move_f ? 0.2f : 0.0f) - (move_b ? 0.2f : 0.0f)
+      .z = (move_b ? 0.2f : 0.0f) - (move_f ? 0.2f : 0.0f)
     };
     kl_camera_local_move(&cam, &offset);
 

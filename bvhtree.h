@@ -28,10 +28,10 @@ typedef union kl_bvh_node {
 } kl_bvh_node_t;
 
 typedef int  (*kl_bvh_filter_cb)(kl_sphere_t*, void*);
-typedef void (*kl_bvh_result_cb)(void*);
+typedef void (*kl_bvh_result_cb)(void*, void*);
 
 void kl_bvh_insert(kl_bvh_node_t **root, kl_sphere_t *bounds, void *item);
-void kl_bvh_search(kl_bvh_node_t *root, kl_bvh_filter_cb filtercb, void *userdata, kl_bvh_result_cb resultcb);
+void kl_bvh_search(kl_bvh_node_t *root, kl_bvh_filter_cb filtercb, void *filter_data, kl_bvh_result_cb resultcb, void *result_data);
 
 #endif /* KL_BVHTREE_H */
 

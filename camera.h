@@ -17,8 +17,8 @@ typedef struct kl_camera {
   float        near, far;
   kl_mat4f_t   mat_view;
   kl_mat4f_t   mat_proj;
-  kl_mat4f_t   mat_iview;
   kl_mat4f_t   mat_iproj;
+  kl_vec3f_t   quad_rays[4];
   kl_frustum_t frustum;
 } kl_camera_t;
 

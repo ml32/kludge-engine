@@ -5,15 +5,17 @@
 #include <stdio.h>
 
 void kl_mat4f_mul(kl_mat4f_t *dst, kl_mat4f_t *s1, kl_mat4f_t *s2) {
+  kl_mat4f_t temp;
   for (int c=0; c < 4; c++) {
     for (int r=0; r < 4; r++) {
       float x = 0;
       for (int i=0; i < 4; i++) {
         x += s1->cell[i*4 + r] * s2->cell[c*4 + i];
       }
-      dst->cell[c*4 + r] = x;
+      temp.cell[c*4 + r] = x;
     }
   }
+  *dst = temp;
 }
 
 void kl_mat4f_ortho(kl_mat4f_t *dst, float l, float r, float b, float t, float n, float f) {
@@ -48,6 +50,17 @@ void kl_mat4f_rotation(kl_mat4f_t *dst, kl_quat_t *src) {
       ij + rk,           rr - ii + jj - kk, jk - ri,           0.0f,
       ik - rj,           jk + ri,           rr - ii - jj + kk, 0.0f,
       0.0f,              0.0f,              0.0f,              1.0f
+    }
+  };
+}
+
+void kl_mat4f_scale(kl_mat4f_t *dst, float x, float y, float z) {
+  *dst = (kl_mat4f_t){
+    .cell = {
+      x,    0.0f, 0.0f, 0.0f,
+      0.0f, y,    0.0f, 0.0f,
+      0.0f, 0.0f, z,    0.0f,
+      0.0f, 0.0f, 0.0f, 1.0f
     }
   };
 }
