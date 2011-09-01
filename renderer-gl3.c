@@ -83,6 +83,7 @@ static int envlight_uniform_tdepth;
 static int envlight_uniform_tdiffuse;
 static int envlight_uniform_tnormal;
 static int envlight_uniform_tspecular;
+static int envlight_uniform_temissive;
 static int envlight_uniform_viewpos;
 
 static unsigned int tonemap_fshader;
@@ -289,6 +290,10 @@ void kl_gl3_begin_pass_lighting(kl_mat4f_t *vmatrix, kl_vec3f_t *viewpos, kl_vec
   glActiveTexture(GL_TEXTURE3);
   glBindTexture(GL_TEXTURE_2D, gbuffer_tex_specular);
 
+  glUniform1i(envlight_uniform_temissive, 4);
+  glActiveTexture(GL_TEXTURE4);
+  glBindTexture(GL_TEXTURE_2D, gbuffer_tex_emissive);
+
   glUniform3fv(envlight_uniform_viewpos, 1, (float*)viewpos);
 
   glBindBufferBase(GL_UNIFORM_BUFFER, envlight_uniform_envlight, ubo_envlight);
@@ -422,11 +427,11 @@ void kl_gl3_composite() {
 
 void kl_gl3_debugtex() {
   /* blit debug images */
-  blit_to_screen(gbuffer_tex_depth,    0.2, 0.2, -0.8, -0.8);
-  blit_to_screen(gbuffer_tex_diffuse,  0.2, 0.2, -0.4, -0.8);
-  blit_to_screen(gbuffer_tex_normal,   0.2, 0.2, -0.0, -0.8);
-  blit_to_screen(gbuffer_tex_specular, 0.2, 0.2,  0.4, -0.8);
-  blit_to_screen(gbuffer_tex_emissive, 0.2, 0.2,  0.8, -0.8);
+  blit_to_screen(gbuffer_tex_depth,    0.18, 0.18, -0.78, -0.8);
+  blit_to_screen(gbuffer_tex_diffuse,  0.18, 0.18, -0.39, -0.8);
+  blit_to_screen(gbuffer_tex_normal,   0.18, 0.18, -0.0,  -0.8);
+  blit_to_screen(gbuffer_tex_specular, 0.18, 0.18,  0.39, -0.8);
+  blit_to_screen(gbuffer_tex_emissive, 0.18, 0.18,  0.78, -0.8);
 }
 
 unsigned int kl_gl3_upload_vertdata(void *data, int n) {
@@ -869,6 +874,7 @@ static int init_lighting(int w, int h) {
   envlight_uniform_tdiffuse  = glGetUniformLocation(envlight_program, "tdiffuse");
   envlight_uniform_tnormal   = glGetUniformLocation(envlight_program, "tnormal");
   envlight_uniform_tspecular = glGetUniformLocation(envlight_program, "tspecular");
+  envlight_uniform_temissive = glGetUniformLocation(envlight_program, "temissive");
   envlight_uniform_viewpos   = glGetUniformLocation(envlight_program, "viewpos");
 
   return 0;

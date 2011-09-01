@@ -134,6 +134,7 @@ static const char *fshader_envlight_src =
 "uniform sampler2D tdiffuse;\n"
 "uniform sampler2D tnormal;\n"
 "uniform sampler2D tspecular;\n"
+"uniform sampler2D temissive;\n"
 "uniform vec3 viewpos;\n"
 "smooth in vec3 fray;\n"
 "smooth in vec2 ftexcoord;\n"
@@ -149,14 +150,14 @@ static const char *fshader_envlight_src =
 ""
 "  vec3 diff  = texture(tdiffuse, ftexcoord).rgb;\n"
 "  vec4 spec  = texture(tspecular, ftexcoord);\n"
-"  color.rgb += diff * max(0.0, dot(norm, lightdir));\n"
-"  color.rgb += spec.rgb * pow(max(0.0, dot(reflect, eyedir)), spec.a*255.0);\n"
-"  color.rgb *= light.color.rgb * light.color.a;\n"
-"  color.rgb += diff * light.ambient.rgb * light.ambient.a;\n"
+"  vec4 glow  = texture(temissive, ftexcoord);\n"
+"  color.rgb += diff * max(0.0, dot(norm, lightdir));\n" /* diffuse */
+"  color.rgb += spec.rgb * pow(max(0.0, dot(reflect, eyedir)), spec.a*255.0);\n" /* specular */
+"  color.rgb *= light.color.rgb * light.color.a;\n" /* diffuse/specular scale */
+"  color.rgb += diff * light.ambient.rgb * light.ambient.a;\n" /* ambient */
+"  color.rgb += glow.rgb * exp2(glow.a * 16.0 - 8.0);\n" /* emissive */
 "  color.a    = 1.0;\n"
 "}\n";
-
-/* to decode rgbe emissive value: glow.rgb * exp2(glow.a * 16.0 - 8.0) */
 
 static const char *vshader_tonemap_src = 
 "#version 330\n"
