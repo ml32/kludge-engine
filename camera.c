@@ -121,31 +121,25 @@ static void update_frustum(kl_camera_t *cam) {
 static void update_rays(kl_camera_t *cam) {
   float dy  = tanf(cam->fov / 2.0f);
   float dx  = cam->aspect * dy;
-  kl_vec3f_t local[4] = {
-    {
-      .x = -dx,
-      .y = -dy,
-      .z = -1.0f
-    },
-    {
-      .x =  dx,
-      .y = -dy,
-      .z = -1.0f
-    },
-    {
-      .x =  dx,
-      .y =  dy,
-      .z = -1.0f
-    },
-    {
-      .x = -dx,
-      .y =  dy,
-      .z = -1.0f
-    }
+  cam->quad_rays[0] = (kl_vec3f_t){
+    .x = -dx,
+    .y = -dy,
+    .z = -1.0f
   };
-  for (int i=0; i < 4; i++) {
-    kl_quat_rotate(&cam->quad_rays[i], &cam->orientation, &local[i]);
-    //cam->quad_rays[i] = local[i];
-  }
+  cam->quad_rays[1] = (kl_vec3f_t){
+    .x =  dx,
+    .y = -dy,
+    .z = -1.0f
+  };
+  cam->quad_rays[2] = (kl_vec3f_t){
+    .x =  dx,
+    .y =  dy,
+    .z = -1.0f
+  };
+  cam->quad_rays[3] = (kl_vec3f_t){
+    .x = -dx,
+    .y =  dy,
+    .z = -1.0f
+  };
 }
 /* vim: set ts=2 sw=2 et */

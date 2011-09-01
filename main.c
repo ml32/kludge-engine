@@ -34,7 +34,7 @@ int main(int argc, char **argv) {
   kl_vec3f_t light2_pos = { .x = -10.0f, .y = -30.0f, .z = -10.0f };
   kl_render_add_light(&light2_pos, 0.8f, 0.8f, 1.0f, 1500.0f);
   kl_vec3f_t envlight_dir = { 2.0f, 1.0f, -2.0f };
-  kl_render_set_envlight(&envlight_dir, 1.0f, 1.0f, 1.0f, 0.1f, 1.0f, 0.9f, 0.6f, 0.6f);
+  kl_render_set_envlight(&envlight_dir, 0.4f, 0.8f, 1.0f, 0.1f, 1.0f, 0.9f, 0.6f, 0.6f);
   
   int move_f = 0;
   int move_b = 0;

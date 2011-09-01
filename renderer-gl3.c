@@ -35,6 +35,7 @@ static unsigned int rbo_depth;
 static unsigned int tex_lighting;
 static unsigned int fbo_lighting;
 static unsigned int ubo_envlight;
+static unsigned int tex_randnorm;
 
 static unsigned int gbuffer_fshader;
 static unsigned int gbuffer_vshader;
@@ -84,6 +85,7 @@ static int envlight_uniform_tdiffuse;
 static int envlight_uniform_tnormal;
 static int envlight_uniform_tspecular;
 static int envlight_uniform_temissive;
+static int envlight_uniform_trandnorm;
 static int envlight_uniform_viewpos;
 
 static unsigned int tonemap_fshader;
@@ -141,6 +143,29 @@ int kl_gl3_init() {
   glBindRenderbuffer(GL_RENDERBUFFER, rbo_depth);
   glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, w, h);
   glBindRenderbuffer(GL_RENDERBUFFER, 0);
+
+  /* create random normal texture */
+  uint8_t *buf = malloc(0x10000 * 3);
+  for (int i=0; i < 0x10000; i++) {
+    kl_vec3f_t norm = {
+      .x = 2.0f * ((float)rand() / (float)RAND_MAX) - 1.0f,
+      .y = 2.0f * ((float)rand() / (float)RAND_MAX) - 1.0f,
+      .z = 2.0f * ((float)rand() / (float)RAND_MAX) - 1.0f
+    };
+    kl_vec3f_norm(&norm, &norm);
+    buf[i*3 + 0] = (uint8_t)(norm.x * 128.0f + 128.0f);
+    buf[i*3 + 1] = (uint8_t)(norm.y * 128.0f + 128.0f);
+    buf[i*3 + 2] = (uint8_t)(norm.z * 128.0f + 128.0f);
+  }
+  glGenTextures(1, &tex_lighting);
+  glBindTexture(GL_TEXTURE_2D, tex_randnorm);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB8, 0x100, 0x100, 0, GL_RGB, GL_UNSIGNED_BYTE, buf);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+  glBindTexture(GL_TEXTURE_2D, 0);
+  free(buf);
 
   /* create environmental lighting UBO */
   glGenBuffers(1, &ubo_envlight);
@@ -293,6 +318,10 @@ void kl_gl3_begin_pass_lighting(kl_mat4f_t *vmatrix, kl_vec3f_t *viewpos, kl_vec
   glUniform1i(envlight_uniform_temissive, 4);
   glActiveTexture(GL_TEXTURE4);
   glBindTexture(GL_TEXTURE_2D, gbuffer_tex_emissive);
+
+  glUniform1i(envlight_uniform_trandnorm, 5);
+  glActiveTexture(GL_TEXTURE5);
+  glBindTexture(GL_TEXTURE_2D, tex_randnorm);
 
   glUniform3fv(envlight_uniform_viewpos, 1, (float*)viewpos);
 
@@ -875,6 +904,7 @@ static int init_lighting(int w, int h) {
   envlight_uniform_tnormal   = glGetUniformLocation(envlight_program, "tnormal");
   envlight_uniform_tspecular = glGetUniformLocation(envlight_program, "tspecular");
   envlight_uniform_temissive = glGetUniformLocation(envlight_program, "temissive");
+  envlight_uniform_trandnorm = glGetUniformLocation(envlight_program, "trandnorm");
   envlight_uniform_viewpos   = glGetUniformLocation(envlight_program, "viewpos");
 
   return 0;
