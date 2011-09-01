@@ -29,6 +29,7 @@ int kl_render_init();
 void kl_render_draw(kl_camera_t *cam);
 void kl_render_add_model(kl_model_t *model);
 void kl_render_add_light(kl_vec3f_t *position, float r, float g, float b, float intensity);
+void kl_render_set_envlight(kl_vec3f_t *direction, float amb_r, float amb_g, float amb_b, float amb_intensity, float diff_r, float diff_g, float diff_b, float diff_intensity);
 unsigned int kl_render_upload_vertdata(void *data, int n);
 unsigned int kl_render_upload_tris(unsigned int *data, int n);
 unsigned int kl_render_upload_texture(void *data, int w, int h, int format, int type);

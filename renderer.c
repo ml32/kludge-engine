@@ -23,7 +23,7 @@ static kl_bvh_node_t *bvh_models = NULL;
 static kl_bvh_node_t *bvh_lights = NULL;
 
 /* ------------------------- */
-int kl_render_init() { /* these all seem very unecessary */
+int kl_render_init() {
   return kl_gl3_init();
 }
 
@@ -53,6 +53,10 @@ void kl_render_draw(kl_camera_t *cam) {
 
 void kl_render_add_model(kl_model_t* model) {
   kl_bvh_insert(&bvh_models, &model->bounds, model);
+}
+
+void kl_render_set_envlight(kl_vec3f_t *direction, float amb_r, float amb_g, float amb_b, float amb_intensity, float diff_r, float diff_g, float diff_b, float diff_intensity) {
+  kl_gl3_update_envlight(direction, amb_r, amb_g, amb_b, amb_intensity, diff_r, diff_g, diff_b, diff_intensity);
 }
 
 void kl_render_add_light(kl_vec3f_t *position, float r, float g, float b, float intensity) {

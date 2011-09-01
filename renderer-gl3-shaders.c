@@ -102,10 +102,58 @@ static const char *fshader_pointlight_src =
 "  vec3 eyedir   = -normalize(fray);\n"
 "  vec3 reflect  = 2.0 * norm * dot(norm, lightdir) - lightdir;\n"
 ""
-"  vec3 diff = texture(tdiffuse, ftexcoord).rgb;\n"
-"  vec4 spec = texture(tspecular, ftexcoord);\n"
-"  color.rgb = light.color.rgb * (luminance * diff * dot(norm, lightdir) + luminance * spec.rgb * pow(max(0.0, dot(reflect, eyedir)), spec.a*255.0));\n"
-"  color.a   = 1.0;\n"
+"  vec3 diff  = texture(tdiffuse, ftexcoord).rgb;\n"
+"  vec4 spec  = texture(tspecular, ftexcoord);\n"
+"  color.rgb  = diff * max(0.0, dot(norm, lightdir));\n" /* diffuse */
+"  color.rgb += spec.rgb * pow(max(0.0, dot(reflect, eyedir)), spec.a*255.0);\n" /* specular */
+"  color.rgb *= light.color.rgb * luminance;\n"
+"  color.a    = 1.0;\n"
+"}\n";
+
+static const char *vshader_envlight_src = 
+"#version 330\n"
+"layout(location = 0) in vec2 vcoord;\n"
+"layout(location = 1) in vec3 vray;\n"
+"smooth out vec3 fray;\n"
+"smooth out vec2 ftexcoord;\n"
+"void main () {\n"
+"  fray      = vray;\n"
+"  ftexcoord = vcoord * 0.5 + 0.5;\n"
+"  gl_Position = vec4(vcoord, 0.0, 1.0);\n"
+"}\n";
+
+static const char *fshader_envlight_src =
+"#version 330\n"
+"layout(std140) uniform envlight {\n"
+"  vec4  ambient;\n"
+"  vec4  color;\n"
+"  vec4  direction;\n"
+"} light;\n"
+"uniform mat4 vmatrix;\n"
+"uniform sampler2D tdepth;\n"
+"uniform sampler2D tdiffuse;\n"
+"uniform sampler2D tnormal;\n"
+"uniform sampler2D tspecular;\n"
+"uniform vec3 viewpos;\n"
+"smooth in vec3 fray;\n"
+"smooth in vec2 ftexcoord;\n"
+"layout(location = 0) out vec4 color;\n"
+"void main () {\n"
+"  vec3 norm;\n"
+"  norm.xy = texture(tnormal, ftexcoord).xy;\n"
+"  norm.z  = sqrt(1.0 - dot(norm.xy, norm.xy));\n"
+""
+"  vec3 lightdir = normalize(mat3(vmatrix[0].xyz, vmatrix[1].xyz, vmatrix[2].xyz) * -light.direction.xyz);\n"
+"  vec3 eyedir   = -normalize(fray);\n"
+"  vec3 reflect  = 2.0 * norm * dot(norm, lightdir) - lightdir;\n"
+""
+"  vec3 diff  = texture(tdiffuse, ftexcoord).rgb;\n"
+"  vec4 spec  = texture(tspecular, ftexcoord);\n"
+"  color.rgb += diff * max(0.0, dot(norm, lightdir));\n"
+"  color.rgb += spec.rgb * pow(max(0.0, dot(reflect, eyedir)), spec.a*255.0);\n"
+"  color.rgb *= light.color.rgb * light.color.a;\n"
+"  color.rgb += diff * light.ambient.rgb * light.ambient.a;\n"
+"  color.a    = 1.0;\n"
 "}\n";
 
 /* to decode rgbe emissive value: glow.rgb * exp2(glow.a * 16.0 - 8.0) */

@@ -34,6 +34,7 @@ static void blit_to_screen(unsigned int texture, float w, float h, float x, floa
 static unsigned int rbo_depth;
 static unsigned int tex_lighting;
 static unsigned int fbo_lighting;
+static unsigned int ubo_envlight;
 
 static unsigned int gbuffer_fshader;
 static unsigned int gbuffer_vshader;
@@ -73,6 +74,17 @@ static int pointlight_uniform_tnormal;
 static int pointlight_uniform_tspecular;
 static int pointlight_uniform_viewpos;
 
+static unsigned int envlight_fshader;
+static unsigned int envlight_vshader;
+static unsigned int envlight_program;
+static int envlight_uniform_envlight;
+static int envlight_uniform_vmatrix;
+static int envlight_uniform_tdepth;
+static int envlight_uniform_tdiffuse;
+static int envlight_uniform_tnormal;
+static int envlight_uniform_tspecular;
+static int envlight_uniform_viewpos;
+
 static unsigned int tonemap_fshader;
 static unsigned int tonemap_vshader;
 static unsigned int tonemap_program;
@@ -103,6 +115,14 @@ typedef struct uniform_light {
   float intensity;
 } uniform_light_t;
 
+typedef struct uniform_envlight {
+  float amb_r, amb_g, amb_b;
+  float amb_intensity;
+  float diff_r, diff_g, diff_b;
+  float diff_intensity;
+  kl_vec4f_t direction;
+} uniform_envlight_t;
+
 #define LOGBUFFER_SIZE 0x4000
 static char logbuffer[LOGBUFFER_SIZE];
 
@@ -121,6 +141,10 @@ int kl_gl3_init() {
   glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, w, h);
   glBindRenderbuffer(GL_RENDERBUFFER, 0);
 
+  /* create environmental lighting UBO */
+  glGenBuffers(1, &ubo_envlight);
+
+  /* create shader programs */
   if (init_gbuffer(w, h) < 0) return -1;
   if (init_minimal() < 0) return -1;
   if (init_lighting(w, h) < 0) return -1;
@@ -229,7 +253,6 @@ void kl_gl3_draw_pass_gbuffer(kl_model_t *model) {
 }
 
 void kl_gl3_begin_pass_lighting(kl_mat4f_t *vmatrix, kl_vec3f_t *viewpos, kl_vec3f_t *rays) {
-  glEnable(GL_STENCIL_TEST);
   glBlendFunc(GL_ONE, GL_ONE); /* additive blending */
   glDepthMask(GL_FALSE); /* disable depth writes */
   glCullFace(GL_FRONT);
@@ -239,6 +262,41 @@ void kl_gl3_begin_pass_lighting(kl_mat4f_t *vmatrix, kl_vec3f_t *viewpos, kl_vec
   glDrawBuffers(1, attachments);
 
   glClear(GL_COLOR_BUFFER_BIT);
+
+  /* update perspective quad rays */
+  kl_gl3_update_vertdata(vbo_pquad_rays, rays, 4*sizeof(kl_vec3f_t));
+
+  /* do environmental lighting pass */
+  glUseProgram(envlight_program);
+
+  glEnable(GL_BLEND);
+
+  glUniformMatrix4fv(envlight_uniform_vmatrix, 1, GL_FALSE, (float*)vmatrix);
+
+  glUniform1i(envlight_uniform_tdepth, 0);
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, gbuffer_tex_depth);
+
+  glUniform1i(envlight_uniform_tdiffuse, 1);
+  glActiveTexture(GL_TEXTURE1);
+  glBindTexture(GL_TEXTURE_2D, gbuffer_tex_diffuse);
+
+  glUniform1i(envlight_uniform_tnormal, 2);
+  glActiveTexture(GL_TEXTURE2);
+  glBindTexture(GL_TEXTURE_2D, gbuffer_tex_normal);
+
+  glUniform1i(envlight_uniform_tspecular, 3);
+  glActiveTexture(GL_TEXTURE3);
+  glBindTexture(GL_TEXTURE_2D, gbuffer_tex_specular);
+
+  glUniform3fv(envlight_uniform_viewpos, 1, (float*)viewpos);
+
+  glBindBufferBase(GL_UNIFORM_BUFFER, envlight_uniform_envlight, ubo_envlight);
+
+  glBindVertexArray(vao_pquad);
+  glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+
+  glDisable(GL_BLEND);
 
   /* initialize draw pass uniforms */
   glUseProgram(pointlight_program);
@@ -263,8 +321,7 @@ void kl_gl3_begin_pass_lighting(kl_mat4f_t *vmatrix, kl_vec3f_t *viewpos, kl_vec
 
   glUniform3fv(pointlight_uniform_viewpos, 1, (float*)viewpos);
 
-  /* update perspective quad rays */
-  kl_gl3_update_vertdata(vbo_pquad_rays, rays, 4*sizeof(kl_vec3f_t));
+  glEnable(GL_STENCIL_TEST);
 }
 
 void kl_gl3_end_pass_lighting() {
@@ -323,8 +380,6 @@ void kl_gl3_begin_pass_debug() {
 
   glEnable(GL_DEPTH_TEST);
   glDepthFunc(GL_LEQUAL);
-
-  //glClear(GL_DEPTH_BUFFER_BIT);
 
   glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 
@@ -487,6 +542,21 @@ unsigned int kl_gl3_upload_light(kl_vec3f_t *position, float r, float g, float b
   glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
   return ubo;
+}
+
+void kl_gl3_update_envlight(kl_vec3f_t *direction, float amb_r, float amb_g, float amb_b, float amb_intensity, float diff_r, float diff_g, float diff_b, float diff_intensity) {
+  uniform_envlight_t light = {
+    .direction = { direction->x, direction->y, direction->z, 1.0f },
+    .amb_r = amb_r, .amb_g = amb_g, .amb_b = amb_b,
+    .amb_intensity = amb_intensity,
+    .diff_r = diff_r, .diff_g = diff_g, .diff_b = diff_b,
+    .diff_intensity = diff_intensity
+  };
+  
+
+  glBindBuffer(GL_UNIFORM_BUFFER, ubo_envlight);
+  glBufferData(GL_UNIFORM_BUFFER, sizeof(uniform_envlight_t), &light, GL_DYNAMIC_DRAW);
+  glBindBuffer(GL_UNIFORM_BUFFER, 0);
 }
 
 void kl_gl3_free_texture(unsigned int texture) {
@@ -777,6 +847,29 @@ static int init_lighting(int w, int h) {
   pointlight_uniform_tnormal    = glGetUniformLocation(pointlight_program, "tnormal");
   pointlight_uniform_tspecular  = glGetUniformLocation(pointlight_program, "tspecular");
   pointlight_uniform_viewpos    = glGetUniformLocation(pointlight_program, "viewpos");
+
+  /* environmental lighting */
+  if (create_shader("environmental lighting vertex shader", GL_VERTEX_SHADER, vshader_envlight_src, &envlight_vshader) < 0) return -1;
+  if (create_shader("environmental lighting fragment shader", GL_FRAGMENT_SHADER, fshader_envlight_src, &envlight_fshader) < 0) return -1;
+
+  envlight_program = glCreateProgram();
+  glAttachShader(envlight_program, envlight_vshader);
+  glAttachShader(envlight_program, envlight_fshader);
+  glLinkProgram(envlight_program);
+  glGetProgramiv(envlight_program, GL_LINK_STATUS, &status);
+  if (status != GL_TRUE) {
+    glGetProgramInfoLog(envlight_program, LOGBUFFER_SIZE, NULL, logbuffer);
+    fprintf(stderr, "Render: Failed to compile environmental lighting shader program.\n\tDetails: %s\n", logbuffer);
+    return -1;
+  }
+
+  envlight_uniform_envlight  = glGetUniformBlockIndex(envlight_program, "envlight");
+  envlight_uniform_vmatrix   = glGetUniformLocation(envlight_program, "vmatrix");
+  envlight_uniform_tdepth    = glGetUniformLocation(envlight_program, "tdepth");
+  envlight_uniform_tdiffuse  = glGetUniformLocation(envlight_program, "tdiffuse");
+  envlight_uniform_tnormal   = glGetUniformLocation(envlight_program, "tnormal");
+  envlight_uniform_tspecular = glGetUniformLocation(envlight_program, "tspecular");
+  envlight_uniform_viewpos   = glGetUniformLocation(envlight_program, "viewpos");
 
   return 0;
 }
