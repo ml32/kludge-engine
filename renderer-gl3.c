@@ -24,6 +24,7 @@ static int convertenum(int value);
 static int typesize(int value);
 static int channels(int value);
 static int create_shader(char *name, int type, const char *src, unsigned int *shader);
+static int create_program(char *name, unsigned int vshader, unsigned int fshader, unsigned int *program);
 static int init_gbuffer(int w, int h);
 static int init_blit();
 static int init_minimal();
@@ -707,9 +708,24 @@ static int create_shader(char *name, int type, const char *src, unsigned int *sh
   return 0;
 }
 
-static int init_gbuffer(int w, int h) {
+static int create_program(char *name, unsigned int vshader, unsigned int fshader, unsigned int *program) {
   int status;
 
+  int id = glCreateProgram();
+  *program = id;
+  glAttachShader(id, vshader);
+  glAttachShader(id, fshader);
+  glLinkProgram(id);
+  glGetProgramiv(id, GL_LINK_STATUS, &status);
+  if (status != GL_TRUE) {
+    glGetProgramInfoLog(id, LOGBUFFER_SIZE, NULL, logbuffer);
+    fprintf(stderr, "Render: Failed to link %s\n\tDetails: %s\n", name, logbuffer);
+    return -1;
+  }
+  return 0;
+}
+
+static int init_gbuffer(int w, int h) {
   /* g-buffer format: */
   /* depth: 32f */
   /* diffuse: 8 red, 8 blue, 8 green, 8 unused */
@@ -771,7 +787,7 @@ static int init_gbuffer(int w, int h) {
   glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT3, GL_TEXTURE_2D, gbuffer_tex_specular, 0);
   glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT4, GL_TEXTURE_2D, gbuffer_tex_emissive, 0);
   glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, rbo_depth);
-  status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+  int status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
   if (status != GL_FRAMEBUFFER_COMPLETE) {
     fprintf(stderr, "Render: G-buffer is incomplete.\n\tDetails: %x\n", status);
     return -1;
@@ -780,17 +796,7 @@ static int init_gbuffer(int w, int h) {
 
   if (create_shader("g-buffer vertex shader", GL_VERTEX_SHADER, vshader_gbuffer_src, &gbuffer_vshader) < 0) return -1;
   if (create_shader("g-buffer fragment shader", GL_FRAGMENT_SHADER, fshader_gbuffer_src, &gbuffer_fshader) < 0) return -1;
-
-  gbuffer_program = glCreateProgram();
-  glAttachShader(gbuffer_program, gbuffer_vshader);
-  glAttachShader(gbuffer_program, gbuffer_fshader);
-  glLinkProgram(gbuffer_program);
-  glGetProgramiv(gbuffer_program, GL_LINK_STATUS, &status);
-  if (status != GL_TRUE) {
-    glGetProgramInfoLog(gbuffer_program, LOGBUFFER_SIZE, NULL, logbuffer);
-    fprintf(stderr, "Render: Failed to compile gbuffer shader program.\n\tDetails: %s\n", logbuffer);
-    return -1;
-  }
+  if (create_program("g-buffer shader program", gbuffer_vshader, gbuffer_fshader, &gbuffer_program) < 0) return -1;
 
   bind_ubo(envlight_program, "scene", 0);
   gbuffer_uniform_tdiffuse  = glGetUniformLocation(gbuffer_program, "tdiffuse");
@@ -804,18 +810,8 @@ static int init_blit() {
   /* screen blitting shader program */
   if (create_shader("screen vertex shader", GL_VERTEX_SHADER, vshader_blit_src, &blit_vshader) < 0) return -1;
   if (create_shader("screen fragment shader", GL_FRAGMENT_SHADER, fshader_blit_src, &blit_fshader) < 0) return -1;
+  if (create_program("screen shader program", blit_vshader, blit_fshader, &blit_program) < 0) return -1;
 
-  int status;
-  blit_program = glCreateProgram();
-  glAttachShader(blit_program, blit_vshader);
-  glAttachShader(blit_program, blit_fshader);
-  glLinkProgram(blit_program);
-  glGetProgramiv(blit_program, GL_LINK_STATUS, &status);
-  if (status != GL_TRUE) {
-    glGetProgramInfoLog(blit_program, LOGBUFFER_SIZE, NULL, logbuffer);
-    fprintf(stderr, "Render: Failed to compile screen shader program.\n\tDetails: %s\n", logbuffer);
-    return -1;
-  }
   blit_uniform_image  = glGetUniformLocation(blit_program, "image");
   blit_uniform_size   = glGetUniformLocation(blit_program, "size");
   blit_uniform_offset = glGetUniformLocation(blit_program, "offset");
@@ -824,34 +820,23 @@ static int init_blit() {
 }
 
 static int init_minimal() {
-  int status;
-
   if (create_shader("minimal vertex shader", GL_VERTEX_SHADER, vshader_minimal_src, &minimal_vshader) < 0) return -1;
  
   minimal_program = glCreateProgram();
   glAttachShader(minimal_program, minimal_vshader);
   glLinkProgram(minimal_program);
+  int status;
   glGetProgramiv(minimal_program, GL_LINK_STATUS, &status);
   if (status != GL_TRUE) {
     glGetProgramInfoLog(minimal_program, LOGBUFFER_SIZE, NULL, logbuffer);
-    fprintf(stderr, "Render: Failed to compile minimal shader program.\n\tDetails: %s\n", logbuffer);
+    fprintf(stderr, "Render: Failed to link minimal shader program.\n\tDetails: %s\n", logbuffer);
     return -1;
   }
 
   minimal_uniform_mvpmatrix = glGetUniformLocation(minimal_program, "mvpmatrix");
 
   if (create_shader("flat color fragment shader", GL_FRAGMENT_SHADER, fshader_flatcolor_src, &flatcolor_fshader) < 0) return -1;
-
-  flatcolor_program = glCreateProgram();
-  glAttachShader(flatcolor_program, minimal_vshader);
-  glAttachShader(flatcolor_program, flatcolor_fshader);
-  glLinkProgram(flatcolor_program);
-  glGetProgramiv(flatcolor_program, GL_LINK_STATUS, &status);
-  if (status != GL_TRUE) {
-    glGetProgramInfoLog(flatcolor_program, LOGBUFFER_SIZE, NULL, logbuffer);
-    fprintf(stderr, "Render: Failed to compile flat color shader program.\n\tDetails: %s\n", logbuffer);
-    return -1;
-  }
+  if (create_program("flat color shader program", minimal_vshader, flatcolor_fshader, &flatcolor_program) < 0) return -1;
 
   flatcolor_uniform_mvpmatrix = glGetUniformLocation(flatcolor_program, "mvpmatrix");
   flatcolor_uniform_color     = glGetUniformLocation(flatcolor_program, "color");
@@ -860,8 +845,6 @@ static int init_minimal() {
 }
 
 static int init_lighting(int w, int h) {
-  int status;
-
   glGenTextures(1, &tex_lighting);
   glBindTexture(GL_TEXTURE_2D, tex_lighting);
   glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, w, h, 0, GL_RGBA, GL_FLOAT, NULL);
@@ -875,7 +858,7 @@ static int init_lighting(int w, int h) {
   glBindFramebuffer(GL_FRAMEBUFFER, fbo_lighting);
   glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex_lighting, 0);
   glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, rbo_depth);
-  status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+  int status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
   if (status != GL_FRAMEBUFFER_COMPLETE) {
     fprintf(stderr, "Render: HDR lighting framebuffer is incomplete.\n\tDetails: %x\n", status);
     return -1;
@@ -885,18 +868,8 @@ static int init_lighting(int w, int h) {
   /* point lighting */
   if (create_shader("point lighting vertex shader", GL_VERTEX_SHADER, vshader_pointlight_src, &pointlight_vshader) < 0) return -1;
   if (create_shader("point lighting fragment shader", GL_FRAGMENT_SHADER, fshader_pointlight_src, &pointlight_fshader) < 0) return -1;
+  if (create_program("point lighting shader program", pointlight_vshader, pointlight_fshader, &pointlight_program) < 0) return -1;
 
-  pointlight_program = glCreateProgram();
-  glAttachShader(pointlight_program, pointlight_vshader);
-  glAttachShader(pointlight_program, pointlight_fshader);
-  glLinkProgram(pointlight_program);
-  glGetProgramiv(pointlight_program, GL_LINK_STATUS, &status);
-  if (status != GL_TRUE) {
-    glGetProgramInfoLog(pointlight_program, LOGBUFFER_SIZE, NULL, logbuffer);
-    fprintf(stderr, "Render: Failed to compile point lighting shader program.\n\tDetails: %s\n", logbuffer);
-    return -1;
-  }
-  
   bind_ubo(pointlight_program, "scene", 0);
   bind_ubo(pointlight_program, "pointlight", 1);
   pointlight_uniform_tdepth     = glGetUniformLocation(pointlight_program, "tdepth");
@@ -907,17 +880,7 @@ static int init_lighting(int w, int h) {
   /* environmental lighting */
   if (create_shader("environmental lighting vertex shader", GL_VERTEX_SHADER, vshader_envlight_src, &envlight_vshader) < 0) return -1;
   if (create_shader("environmental lighting fragment shader", GL_FRAGMENT_SHADER, fshader_envlight_src, &envlight_fshader) < 0) return -1;
-
-  envlight_program = glCreateProgram();
-  glAttachShader(envlight_program, envlight_vshader);
-  glAttachShader(envlight_program, envlight_fshader);
-  glLinkProgram(envlight_program);
-  glGetProgramiv(envlight_program, GL_LINK_STATUS, &status);
-  if (status != GL_TRUE) {
-    glGetProgramInfoLog(envlight_program, LOGBUFFER_SIZE, NULL, logbuffer);
-    fprintf(stderr, "Render: Failed to compile environmental lighting shader program.\n\tDetails: %s\n", logbuffer);
-    return -1;
-  }
+  if (create_program("environmental lighting shader program", envlight_vshader, envlight_fshader, &envlight_program) < 0) return -1;
 
   bind_ubo(envlight_program, "scene", 0);
   bind_ubo(envlight_program, "envlight", 1);
@@ -934,18 +897,8 @@ static int init_lighting(int w, int h) {
 static int init_tonemap() {
   if (create_shader("tonemapping vertex shader", GL_VERTEX_SHADER, vshader_tonemap_src, &tonemap_vshader) < 0) return -1;
   if (create_shader("tonemapping fragment shader", GL_FRAGMENT_SHADER, fshader_tonemap_src, &tonemap_fshader) < 0) return -1;
+  if (create_program("tonemapping shader program", tonemap_vshader, tonemap_fshader, &tonemap_program) < 0) return -1;
 
-  int status;
-  tonemap_program = glCreateProgram();
-  glAttachShader(tonemap_program, tonemap_vshader);
-  glAttachShader(tonemap_program, tonemap_fshader);
-  glLinkProgram(tonemap_program);
-  glGetProgramiv(tonemap_program, GL_LINK_STATUS, &status);
-  if (status != GL_TRUE) {
-    glGetProgramInfoLog(tonemap_program, LOGBUFFER_SIZE, NULL, logbuffer);
-    fprintf(stderr, "Render: Failed to compile tonemapping shader program.\n\tDetails: %s\n", logbuffer);
-    return -1;
-  }
   tonemap_uniform_tcomposite = glGetUniformLocation(tonemap_program, "tcomposite");
 
   return 0;
