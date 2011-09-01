@@ -8,11 +8,11 @@
 
 int kl_gl3_init();
 
-void kl_gl3_begin_pass_gbuffer(kl_mat4f_t *vmatrix, kl_mat4f_t *vpmatrix);
+void kl_gl3_begin_pass_gbuffer();
 void kl_gl3_end_pass_gbuffer();
 void kl_gl3_draw_pass_gbuffer(kl_model_t *model);
 
-void kl_gl3_begin_pass_lighting(kl_mat4f_t *vmatrix, kl_vec3f_t *viewpos, kl_vec3f_t *rays);
+void kl_gl3_begin_pass_lighting();
 void kl_gl3_end_pass_lighting();
 void kl_gl3_draw_pass_lighting(kl_mat4f_t *mvpmatrix, unsigned int light);
 
@@ -29,6 +29,7 @@ void kl_gl3_update_vertdata(unsigned int vbo, void *data, int n);
 unsigned int kl_gl3_upload_tris(unsigned int *data, int n);
 unsigned int kl_gl3_upload_texture(void *data, int w, int h, int format, int type);
 unsigned int kl_gl3_upload_light(kl_vec3f_t *position, float r, float g, float b, float intensity);
+void kl_gl3_update_scene(kl_scene_t *scene);
 void kl_gl3_update_envlight(kl_vec3f_t *direction, float amb_r, float amb_g, float amb_b, float amb_intensity, float diff_r, float diff_g, float diff_b, float diff_intensity);
 void kl_gl3_free_texture(unsigned int texture);
 unsigned int kl_gl3_define_attribs(int tris, kl_render_attrib_t *cfg, int n);

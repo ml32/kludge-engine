@@ -30,18 +30,18 @@ static int init_minimal();
 static int init_lighting(int w, int h);
 static int init_tonemap();
 static void blit_to_screen(unsigned int texture, float w, float h, float x, float y);
+static void bind_ubo(unsigned int program, char *name, unsigned int binding);
 
 static unsigned int rbo_depth;
 static unsigned int tex_lighting;
 static unsigned int fbo_lighting;
 static unsigned int ubo_envlight;
+static unsigned int ubo_scene;
 static unsigned int tex_randnorm;
 
 static unsigned int gbuffer_fshader;
 static unsigned int gbuffer_vshader;
 static unsigned int gbuffer_program;
-static int gbuffer_uniform_vmatrix;
-static int gbuffer_uniform_vpmatrix;
 static int gbuffer_uniform_tdiffuse;
 static int gbuffer_uniform_tnormal;
 static int gbuffer_uniform_tspecular;
@@ -67,26 +67,20 @@ static int flatcolor_uniform_color;
 static unsigned int pointlight_fshader;
 static unsigned int pointlight_vshader;
 static unsigned int pointlight_program;
-static int pointlight_uniform_pointlight;
-static int pointlight_uniform_vmatrix;
 static int pointlight_uniform_tdepth;
 static int pointlight_uniform_tdiffuse;
 static int pointlight_uniform_tnormal;
 static int pointlight_uniform_tspecular;
-static int pointlight_uniform_viewpos;
 
 static unsigned int envlight_fshader;
 static unsigned int envlight_vshader;
 static unsigned int envlight_program;
-static int envlight_uniform_envlight;
-static int envlight_uniform_vmatrix;
 static int envlight_uniform_tdepth;
 static int envlight_uniform_tdiffuse;
 static int envlight_uniform_tnormal;
 static int envlight_uniform_tspecular;
 static int envlight_uniform_temissive;
 static int envlight_uniform_trandnorm;
-static int envlight_uniform_viewpos;
 
 static unsigned int tonemap_fshader;
 static unsigned int tonemap_vshader;
@@ -105,12 +99,21 @@ static int vbo_quad_coords;
 static int vbo_quad_tris;
 static int vao_quad;
 /* "perspective" quad (quad with perspective rays) */
-static int vbo_pquad_rays;
+static int vbo_pquad_rays_eye;   /* eye coords */
+static int vbo_pquad_rays_world; /* world coords */
 static int vao_pquad; 
 /* low-resolution sphere for light stenciling */
 static int vbo_sphere_coords;
 static int vbo_sphere_tris;
 static int vao_sphere;
+
+typedef struct uniform_scene {
+  kl_mat4f_t   viewmatrix;
+  kl_mat4f_t   projmatrix;
+  kl_mat4f_t   vpmatrix;
+  kl_vec4f_t   viewpos;
+  kl_mat3x4f_t viewrot;
+} uniform_scene_t;
 
 typedef struct uniform_light {
   kl_vec4f_t position;
@@ -167,8 +170,9 @@ int kl_gl3_init() {
   glBindTexture(GL_TEXTURE_2D, 0);
   free(buf);
 
-  /* create environmental lighting UBO */
+  /* create uniform buffer objects */
   glGenBuffers(1, &ubo_envlight);
+  glGenBuffers(1, &ubo_scene);
 
   /* create shader programs */
   if (init_gbuffer(w, h) < 0) return -1;
@@ -193,8 +197,9 @@ int kl_gl3_init() {
   };
   vao_quad = kl_gl3_define_attribs(vbo_quad_tris, &attrib_quad, 1);
 
-  vbo_pquad_rays = kl_gl3_upload_vertdata(NULL, 0);
-  kl_render_attrib_t attrib_pquad[2] = {
+  vbo_pquad_rays_eye   = kl_gl3_upload_vertdata(NULL, 0);
+  vbo_pquad_rays_world = kl_gl3_upload_vertdata(NULL, 0);
+  kl_render_attrib_t attrib_pquad[3] = {
     {
       .index  = 0,
       .size   = 2,
@@ -205,10 +210,16 @@ int kl_gl3_init() {
       .index  = 1,
       .size   = 3,
       .type   = KL_RENDER_FLOAT,
-      .buffer = vbo_pquad_rays
+      .buffer = vbo_pquad_rays_eye
+    },
+    {
+      .index  = 2,
+      .size   = 3,
+      .type   = KL_RENDER_FLOAT,
+      .buffer = vbo_pquad_rays_world
     }
   };
-  vao_pquad = kl_gl3_define_attribs(vbo_quad_tris, attrib_pquad, 2);
+  vao_pquad = kl_gl3_define_attribs(vbo_quad_tris, attrib_pquad, 3);
 
   /* create sphere for point lighting */
   vbo_sphere_coords = kl_gl3_upload_vertdata(verts_sphere, SPHERE_NUMVERTS * 3 * sizeof(float));
@@ -225,7 +236,29 @@ int kl_gl3_init() {
   return 0;
 }
 
-void kl_gl3_begin_pass_gbuffer(kl_mat4f_t *vmatrix, kl_mat4f_t *vpmatrix) {
+void kl_gl3_update_scene(kl_scene_t *scene) {
+  kl_mat3f_t *viewrot = &scene->viewrot;
+  uniform_scene_t data = {
+    .viewmatrix = scene->viewmatrix,
+    .projmatrix = scene->projmatrix,
+    .vpmatrix   = scene->vpmatrix,
+    .viewpos    = { .x = scene->viewpos.x, .y = scene->viewpos.y, .z = scene->viewpos.z, .w = 1.0f },
+    .viewrot    = {
+      .column[0] = { .x = viewrot->column[0].x, .y = viewrot->column[0].y, .z = viewrot->column[0].z, .w = 0.0f },
+      .column[1] = { .x = viewrot->column[1].x, .y = viewrot->column[1].y, .z = viewrot->column[1].z, .w = 0.0f },
+      .column[2] = { .x = viewrot->column[2].x, .y = viewrot->column[2].y, .z = viewrot->column[2].z, .w = 0.0f }
+    }
+  };
+
+  glBindBuffer(GL_UNIFORM_BUFFER, ubo_scene);
+  glBufferData(GL_UNIFORM_BUFFER, sizeof(uniform_scene_t), &data, GL_DYNAMIC_DRAW);
+  glBindBuffer(GL_UNIFORM_BUFFER, 0);
+
+  kl_gl3_update_vertdata(vbo_pquad_rays_eye,   scene->ray_eye,   4*sizeof(kl_vec3f_t));
+  kl_gl3_update_vertdata(vbo_pquad_rays_world, scene->ray_world, 4*sizeof(kl_vec3f_t));
+}
+
+void kl_gl3_begin_pass_gbuffer() {
   glEnable(GL_CULL_FACE);
   glCullFace(GL_BACK);
   glEnable(GL_DEPTH_TEST);
@@ -239,8 +272,7 @@ void kl_gl3_begin_pass_gbuffer(kl_mat4f_t *vmatrix, kl_mat4f_t *vpmatrix) {
 
   glUseProgram(gbuffer_program);
   
-  glUniformMatrix4fv(gbuffer_uniform_vmatrix,  1, GL_FALSE, (float*)vmatrix);
-  glUniformMatrix4fv(gbuffer_uniform_vpmatrix, 1, GL_FALSE, (float*)vpmatrix);
+  glBindBufferBase(GL_UNIFORM_BUFFER, 0, ubo_scene);
 
   glUniform1i(gbuffer_uniform_tdiffuse, 0);
   glUniform1i(gbuffer_uniform_tnormal, 1);
@@ -278,7 +310,7 @@ void kl_gl3_draw_pass_gbuffer(kl_model_t *model) {
   glFrontFace(GL_CCW);
 }
 
-void kl_gl3_begin_pass_lighting(kl_mat4f_t *vmatrix, kl_vec3f_t *viewpos, kl_vec3f_t *rays) {
+void kl_gl3_begin_pass_lighting() {
   glBlendFunc(GL_ONE, GL_ONE); /* additive blending */
   glDepthMask(GL_FALSE); /* disable depth writes */
   glCullFace(GL_FRONT);
@@ -289,15 +321,13 @@ void kl_gl3_begin_pass_lighting(kl_mat4f_t *vmatrix, kl_vec3f_t *viewpos, kl_vec
 
   glClear(GL_COLOR_BUFFER_BIT);
 
-  /* update perspective quad rays */
-  kl_gl3_update_vertdata(vbo_pquad_rays, rays, 4*sizeof(kl_vec3f_t));
-
   /* do environmental lighting pass */
   glUseProgram(envlight_program);
 
   glEnable(GL_BLEND);
 
-  glUniformMatrix4fv(envlight_uniform_vmatrix, 1, GL_FALSE, (float*)vmatrix);
+  glBindBufferBase(GL_UNIFORM_BUFFER, 0, ubo_scene);
+  glBindBufferBase(GL_UNIFORM_BUFFER, 1, ubo_envlight);
 
   glUniform1i(envlight_uniform_tdepth, 0);
   glActiveTexture(GL_TEXTURE0);
@@ -323,10 +353,6 @@ void kl_gl3_begin_pass_lighting(kl_mat4f_t *vmatrix, kl_vec3f_t *viewpos, kl_vec
   glActiveTexture(GL_TEXTURE5);
   glBindTexture(GL_TEXTURE_2D, tex_randnorm);
 
-  glUniform3fv(envlight_uniform_viewpos, 1, (float*)viewpos);
-
-  glBindBufferBase(GL_UNIFORM_BUFFER, envlight_uniform_envlight, ubo_envlight);
-
   glBindVertexArray(vao_pquad);
   glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 
@@ -335,7 +361,7 @@ void kl_gl3_begin_pass_lighting(kl_mat4f_t *vmatrix, kl_vec3f_t *viewpos, kl_vec
   /* initialize draw pass uniforms */
   glUseProgram(pointlight_program);
 
-  glUniformMatrix4fv(pointlight_uniform_vmatrix, 1, GL_FALSE, (float*)vmatrix);
+  glBindBufferBase(GL_UNIFORM_BUFFER, 0, ubo_scene);
 
   glUniform1i(pointlight_uniform_tdepth, 0);
   glActiveTexture(GL_TEXTURE0);
@@ -352,8 +378,6 @@ void kl_gl3_begin_pass_lighting(kl_mat4f_t *vmatrix, kl_vec3f_t *viewpos, kl_vec
   glUniform1i(pointlight_uniform_tspecular, 3);
   glActiveTexture(GL_TEXTURE3);
   glBindTexture(GL_TEXTURE_2D, gbuffer_tex_specular);
-
-  glUniform3fv(pointlight_uniform_viewpos, 1, (float*)viewpos);
 
   glEnable(GL_STENCIL_TEST);
 }
@@ -398,7 +422,7 @@ void kl_gl3_draw_pass_lighting(kl_mat4f_t *mvpmatrix, unsigned int light) {
   glStencilFunc(GL_NOTEQUAL, 0, 0xFF);
   glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
 
-  glBindBufferBase(GL_UNIFORM_BUFFER, pointlight_uniform_pointlight, light);
+  glBindBufferBase(GL_UNIFORM_BUFFER, 1, light);
 
   glBindVertexArray(vao_pquad);
   glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
@@ -768,8 +792,7 @@ static int init_gbuffer(int w, int h) {
     return -1;
   }
 
-  gbuffer_uniform_vmatrix   = glGetUniformLocation(gbuffer_program, "vmatrix");
-  gbuffer_uniform_vpmatrix  = glGetUniformLocation(gbuffer_program, "vpmatrix");
+  bind_ubo(envlight_program, "scene", 0);
   gbuffer_uniform_tdiffuse  = glGetUniformLocation(gbuffer_program, "tdiffuse");
   gbuffer_uniform_tnormal   = glGetUniformLocation(gbuffer_program, "tnormal");
   gbuffer_uniform_tspecular = glGetUniformLocation(gbuffer_program, "tspecular");
@@ -873,14 +896,13 @@ static int init_lighting(int w, int h) {
     fprintf(stderr, "Render: Failed to compile point lighting shader program.\n\tDetails: %s\n", logbuffer);
     return -1;
   }
-
-  pointlight_uniform_pointlight = glGetUniformBlockIndex(pointlight_program, "pointlight");
-  pointlight_uniform_vmatrix    = glGetUniformLocation(pointlight_program, "vmatrix");
+  
+  bind_ubo(pointlight_program, "scene", 0);
+  bind_ubo(pointlight_program, "pointlight", 1);
   pointlight_uniform_tdepth     = glGetUniformLocation(pointlight_program, "tdepth");
   pointlight_uniform_tdiffuse   = glGetUniformLocation(pointlight_program, "tdiffuse");
   pointlight_uniform_tnormal    = glGetUniformLocation(pointlight_program, "tnormal");
   pointlight_uniform_tspecular  = glGetUniformLocation(pointlight_program, "tspecular");
-  pointlight_uniform_viewpos    = glGetUniformLocation(pointlight_program, "viewpos");
 
   /* environmental lighting */
   if (create_shader("environmental lighting vertex shader", GL_VERTEX_SHADER, vshader_envlight_src, &envlight_vshader) < 0) return -1;
@@ -897,15 +919,14 @@ static int init_lighting(int w, int h) {
     return -1;
   }
 
-  envlight_uniform_envlight  = glGetUniformBlockIndex(envlight_program, "envlight");
-  envlight_uniform_vmatrix   = glGetUniformLocation(envlight_program, "vmatrix");
+  bind_ubo(envlight_program, "scene", 0);
+  bind_ubo(envlight_program, "envlight", 1);
   envlight_uniform_tdepth    = glGetUniformLocation(envlight_program, "tdepth");
   envlight_uniform_tdiffuse  = glGetUniformLocation(envlight_program, "tdiffuse");
   envlight_uniform_tnormal   = glGetUniformLocation(envlight_program, "tnormal");
   envlight_uniform_tspecular = glGetUniformLocation(envlight_program, "tspecular");
   envlight_uniform_temissive = glGetUniformLocation(envlight_program, "temissive");
   envlight_uniform_trandnorm = glGetUniformLocation(envlight_program, "trandnorm");
-  envlight_uniform_viewpos   = glGetUniformLocation(envlight_program, "viewpos");
 
   return 0;
 }
@@ -947,6 +968,11 @@ static void blit_to_screen(unsigned int texture, float w, float h, float x, floa
   glBindVertexArray(0);
 
   glUseProgram(0);
+}
+
+static void bind_ubo(unsigned int program, char *name, unsigned int binding) {
+  unsigned int index = glGetUniformBlockIndex(program, name);
+  glUniformBlockBinding(program, index, binding);
 }
 
 /* vim: set ts=2 sw=2 et */

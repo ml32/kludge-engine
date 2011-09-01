@@ -1,35 +1,7 @@
 #include "camera.h"
 
-static void update_view(kl_camera_t *cam);
-static void update_proj(kl_camera_t *cam);
-static void update_frustum(kl_camera_t *cam);
-static void update_rays(kl_camera_t *cam);
-
-/* ------------------- */
-void kl_camera_update(kl_camera_t *cam) {
-  update_view(cam);
-  update_proj(cam);
-  update_frustum(cam);
-  update_rays(cam);
-}
-
-void kl_camera_local_move(kl_camera_t *cam, kl_vec3f_t *offset) {
-  kl_vec3f_t offset_world;
-  kl_quat_rotate(&offset_world, &cam->orientation, offset);
-  kl_vec3f_add(&cam->position, &cam->position, &offset_world);
-}
-
-void kl_camera_local_rotate(kl_camera_t *cam, kl_vec3f_t *ang) {
-  kl_quat_t q;
-  kl_quat_fromvec(&q, ang);
-
-  kl_quat_t temp;
-  kl_quat_mul(&temp, &cam->orientation, &q);
-  kl_quat_norm(&cam->orientation, &temp);
-}
-
-/* ---------------------- */
-static void update_view(kl_camera_t *cam) {
+void kl_camera_update_scene(kl_camera_t *cam, kl_scene_t *scene) {
+  /* view matrix */
   kl_vec3f_t ipos;
   kl_vec3f_negate(&ipos, &cam->position);
 
@@ -37,15 +9,65 @@ static void update_view(kl_camera_t *cam) {
   kl_mat4f_rotation(&rot, &cam->orientation);
   kl_mat4f_translation(&trans, &ipos);
 
-  kl_mat4f_mul(&cam->mat_view, &rot, &trans);
+  kl_mat4f_t view;
+  kl_mat4f_mul(&view, &rot, &trans);
+
+  /* projection matrix */
+  kl_mat4f_t proj;
+  kl_mat4f_perspective(&proj, cam->aspect, cam->fov, cam->near, cam->far);
+
+  /* view-projection matrix */
+  kl_mat4f_t viewproj;
+  kl_mat4f_mul(&viewproj, &proj, &view);
+
+  /* inverse-projection rays */
+  kl_vec3f_t ray_eye[4];
+  float dy  = tanf(cam->fov / 2.0f);
+  float dx  = cam->aspect * dy;
+  ray_eye[0] = (kl_vec3f_t){
+    .x = -dx,
+    .y = -dy,
+    .z = -1.0f
+  };
+  ray_eye[1] = (kl_vec3f_t){
+    .x =  dx,
+    .y = -dy,
+    .z = -1.0f
+  };
+  ray_eye[2] = (kl_vec3f_t){
+    .x =  dx,
+    .y =  dy,
+    .z = -1.0f
+  };
+  ray_eye[3] = (kl_vec3f_t){
+    .x = -dx,
+    .y =  dy,
+    .z = -1.0f
+  };
+
+  kl_vec3f_t ray_world[4];
+  kl_quat_rotate(&ray_world[0], &cam->orientation, &ray_eye[0]);
+  kl_quat_rotate(&ray_world[1], &cam->orientation, &ray_eye[1]);
+  kl_quat_rotate(&ray_world[2], &cam->orientation, &ray_eye[2]);
+  kl_quat_rotate(&ray_world[3], &cam->orientation, &ray_eye[3]);
+
+  /* copy to scene */
+  *scene = (kl_scene_t) {
+    .viewmatrix = view,
+    .projmatrix = proj,
+    .vpmatrix = viewproj,
+    .viewrot = {
+      .column[0] = { .x = rot.column[0].x, .y = rot.column[0].y, .z = rot.column[0].z },
+      .column[1] = { .x = rot.column[1].x, .y = rot.column[1].y, .z = rot.column[1].z },
+      .column[2] = { .x = rot.column[2].x, .y = rot.column[2].y, .z = rot.column[2].z }
+    },
+    .viewpos = cam->position,
+    .ray_eye = { ray_eye[0], ray_eye[1], ray_eye[2], ray_eye[3] },
+    .ray_world = { ray_world[0], ray_world[1], ray_world[2], ray_world[3] }
+  };
 }
 
-static void update_proj(kl_camera_t *cam) {
-  kl_mat4f_perspective(&cam->mat_proj, cam->aspect, cam->fov, cam->near, cam->far);
-  kl_mat4f_invperspective(&cam->mat_iproj, cam->aspect, cam->fov, cam->near, cam->far);
-}
-
-static void update_frustum(kl_camera_t *cam) {
+void kl_camera_update_frustum(kl_camera_t *cam, kl_frustum_t *frustum) {
   kl_vec3f_t forward_local  = { .x = 0.0f, .y = 0.0f, .z = -1.0f };
   kl_vec3f_t forward_world, backward_world;
   kl_quat_rotate(&forward_world, &cam->orientation, &forward_local);
@@ -108,7 +130,7 @@ static void update_frustum(kl_camera_t *cam) {
     .dist = kl_vec3f_dot(&right_world, &cam->position)
   };
 
-  cam->frustum = (kl_frustum_t){
+  *frustum = (kl_frustum_t){
     .near   = near,
     .far    = far,
     .top    = top,
@@ -118,28 +140,19 @@ static void update_frustum(kl_camera_t *cam) {
   };
 }
 
-static void update_rays(kl_camera_t *cam) {
-  float dy  = tanf(cam->fov / 2.0f);
-  float dx  = cam->aspect * dy;
-  cam->quad_rays[0] = (kl_vec3f_t){
-    .x = -dx,
-    .y = -dy,
-    .z = -1.0f
-  };
-  cam->quad_rays[1] = (kl_vec3f_t){
-    .x =  dx,
-    .y = -dy,
-    .z = -1.0f
-  };
-  cam->quad_rays[2] = (kl_vec3f_t){
-    .x =  dx,
-    .y =  dy,
-    .z = -1.0f
-  };
-  cam->quad_rays[3] = (kl_vec3f_t){
-    .x = -dx,
-    .y =  dy,
-    .z = -1.0f
-  };
+void kl_camera_local_move(kl_camera_t *cam, kl_vec3f_t *offset) {
+  kl_vec3f_t offset_world;
+  kl_quat_rotate(&offset_world, &cam->orientation, offset);
+  kl_vec3f_add(&cam->position, &cam->position, &offset_world);
 }
+
+void kl_camera_local_rotate(kl_camera_t *cam, kl_vec3f_t *ang) {
+  kl_quat_t q;
+  kl_quat_fromvec(&q, ang);
+
+  kl_quat_t temp;
+  kl_quat_mul(&temp, &cam->orientation, &q);
+  kl_quat_norm(&cam->orientation, &temp);
+}
+
 /* vim: set ts=2 sw=2 et */

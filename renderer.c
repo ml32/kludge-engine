@@ -15,9 +15,9 @@ typedef struct light {
 } light_t;
 
 static int checkfrustum(kl_sphere_t *bounds, kl_frustum_t *frustum);
-static void draw_model(kl_model_t *model, void *_);
-static void draw_light(light_t *light, kl_mat4f_t *mat_vp);
-static void draw_bounds(kl_bvh_node_t *node, kl_mat4f_t *mat_vp);
+static void draw_model(kl_model_t *model, kl_scene_t *scene);
+static void draw_light(light_t *light, kl_scene_t *scene);
+static void draw_bounds(kl_bvh_node_t *node, kl_scene_t *scene);
 
 static kl_bvh_node_t *bvh_models = NULL;
 static kl_bvh_node_t *bvh_lights = NULL;
@@ -28,22 +28,24 @@ int kl_render_init() {
 }
 
 void kl_render_draw(kl_camera_t *cam) {
-  kl_camera_update(cam);
+  static kl_scene_t   scene;
+  static kl_frustum_t frustum;
+  kl_camera_update_scene(cam, &scene);
+  kl_camera_update_frustum(cam, &frustum);
 
-  kl_mat4f_t mat_vp;
-  kl_mat4f_mul(&mat_vp, &cam->mat_proj, &cam->mat_view);
+  kl_gl3_update_scene(&scene);
 
-  kl_gl3_begin_pass_gbuffer(&cam->mat_view, &mat_vp);
-  kl_bvh_search(bvh_models, (kl_bvh_filter_cb)&checkfrustum, &cam->frustum, (kl_bvh_result_cb)&draw_model, NULL);
+  kl_gl3_begin_pass_gbuffer();
+  kl_bvh_search(bvh_models, (kl_bvh_filter_cb)&checkfrustum, &frustum, (kl_bvh_result_cb)&draw_model, &scene);
   kl_gl3_end_pass_gbuffer();
 
-  kl_gl3_begin_pass_lighting(&cam->mat_view, &cam->position, cam->quad_rays);
-  kl_bvh_search(bvh_lights, (kl_bvh_filter_cb)&checkfrustum, &cam->frustum, (kl_bvh_result_cb)&draw_light, &mat_vp);
+  kl_gl3_begin_pass_lighting();
+  kl_bvh_search(bvh_lights, (kl_bvh_filter_cb)&checkfrustum, &frustum, (kl_bvh_result_cb)&draw_light, &scene);
   kl_gl3_end_pass_lighting();
 
   kl_gl3_begin_pass_debug();
-  kl_bvh_debug(bvh_models, (kl_bvh_debug_cb)&draw_bounds, &mat_vp);
-  kl_bvh_debug(bvh_lights, (kl_bvh_debug_cb)&draw_bounds, &mat_vp);
+  kl_bvh_debug(bvh_models, (kl_bvh_debug_cb)&draw_bounds, &scene);
+  kl_bvh_debug(bvh_lights, (kl_bvh_debug_cb)&draw_bounds, &scene);
   kl_gl3_end_pass_debug();
 
   kl_gl3_composite();
@@ -113,21 +115,21 @@ static int checkfrustum(kl_sphere_t *bounds, kl_frustum_t *frustum) {
   return 1;
 }
 
-static void draw_model(kl_model_t *model, void *_) {
+static void draw_model(kl_model_t *model, kl_scene_t *scene) {
   kl_gl3_draw_pass_gbuffer(model);
 }
 
-static void draw_light(light_t *light, kl_mat4f_t *mat_vp) {
-  kl_mat4f_t scale, translation, mat_model, mat_mvp;
+static void draw_light(light_t *light, kl_scene_t *scene) {
+  kl_mat4f_t scale, translation, modelmatrix, mvpmatrix;
   kl_mat4f_translation(&translation, &light->position);
   kl_mat4f_scale(&scale, light->scale, light->scale, light->scale);
-  kl_mat4f_mul(&mat_model, &translation, &scale);
-  kl_mat4f_mul(&mat_mvp, mat_vp, &mat_model);
+  kl_mat4f_mul(&modelmatrix, &translation, &scale);
+  kl_mat4f_mul(&mvpmatrix, &scene->vpmatrix, &modelmatrix);
 
-  kl_gl3_draw_pass_lighting(&mat_mvp, light->id);
+  kl_gl3_draw_pass_lighting(&mvpmatrix, light->id);
 }
 
-static void draw_bounds(kl_bvh_node_t *node, kl_mat4f_t *mat_vp) {
+static void draw_bounds(kl_bvh_node_t *node, kl_scene_t *scene) {
   static float colors[] = {
     0.25f, 1.0f, 0.0f,
     1.0f,  0.5f, 0.0f,
@@ -144,13 +146,13 @@ static void draw_bounds(kl_bvh_node_t *node, kl_mat4f_t *mat_vp) {
   kl_vec3f_t position = node->header.bounds.center;
   float      radius   = node->header.bounds.radius;
 
-  kl_mat4f_t scale, translation, mat_model, mat_mvp;
+  kl_mat4f_t scale, translation, modelmatrix, mvpmatrix;
   kl_mat4f_translation(&translation, &position);
   kl_mat4f_scale(&scale, radius, radius, radius);
-  kl_mat4f_mul(&mat_model, &translation, &scale);
-  kl_mat4f_mul(&mat_mvp, mat_vp, &mat_model);
+  kl_mat4f_mul(&modelmatrix, &translation, &scale);
+  kl_mat4f_mul(&mvpmatrix, &scene->vpmatrix, &modelmatrix);
 
-  kl_gl3_draw_pass_debug(&mat_mvp, r, g, b);
+  kl_gl3_draw_pass_debug(&mvpmatrix, r, g, b);
 }
 
 /* vim: set ts=2 sw=2 et */

@@ -11,6 +11,16 @@ typedef union kl_mat4f {
   kl_vec4f_t column[4];
 } kl_mat4f_t;
 
+typedef union kl_mat3x4f {
+  float      cell[12];
+  kl_vec4f_t column[3];
+} kl_mat3x4f_t;
+
+typedef union kl_mat3f {
+  float      cell[9];
+  kl_vec3f_t column[3];
+} kl_mat3f_t;
+
 #define KL_MAT4F_IDENTITY \
 {\
   .cell = {\
