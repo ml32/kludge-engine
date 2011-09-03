@@ -39,7 +39,6 @@ static unsigned int tex_lighting;
 static unsigned int fbo_lighting;
 static unsigned int ubo_envlight;
 static unsigned int ubo_scene;
-static unsigned int tex_randnorm;
 
 static unsigned int gbuffer_fshader;
 static unsigned int gbuffer_vshader;
@@ -71,6 +70,16 @@ static int ssao_uniform_tnormal;
 static unsigned int ssao_tex_occlusion[6];
 static unsigned int ssao_fbo[6];
 
+/* bilateral upsampling for MSSAO */
+static unsigned int upsample_vshader;
+static unsigned int upsample_fshader;
+static unsigned int upsample_program;
+static int upsample_uniform_tdepth;
+static int upsample_uniform_tnormal;
+static int upsample_uniform_tsdepth;
+static int upsample_uniform_tsnormal;
+static int upsample_uniform_tocclusion;
+
 /* "minimal" shader program with no fragment output (used for stencil masks) */
 static unsigned int minimal_vshader;
 static unsigned int minimal_program;
@@ -98,7 +107,7 @@ static int envlight_uniform_tdiffuse;
 static int envlight_uniform_tnormal;
 static int envlight_uniform_tspecular;
 static int envlight_uniform_temissive;
-static int envlight_uniform_trandnorm;
+static int envlight_uniform_tocclusion;
 
 static unsigned int tonemap_fshader;
 static unsigned int tonemap_vshader;
@@ -164,29 +173,6 @@ int kl_gl3_init() {
   glBindRenderbuffer(GL_RENDERBUFFER, rbo_depth);
   glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, w, h);
   glBindRenderbuffer(GL_RENDERBUFFER, 0);
-
-  /* create random normal texture */
-  uint8_t *buf = malloc(0x10000 * 3);
-  for (int i=0; i < 0x10000; i++) {
-    kl_vec3f_t norm = {
-      .x = 2.0f * ((float)rand() / (float)RAND_MAX) - 1.0f,
-      .y = 2.0f * ((float)rand() / (float)RAND_MAX) - 1.0f,
-      .z = 2.0f * ((float)rand() / (float)RAND_MAX) - 1.0f
-    };
-    kl_vec3f_norm(&norm, &norm);
-    buf[i*3 + 0] = (uint8_t)(norm.x * 128.0f + 128.0f);
-    buf[i*3 + 1] = (uint8_t)(norm.y * 128.0f + 128.0f);
-    buf[i*3 + 2] = (uint8_t)(norm.z * 128.0f + 128.0f);
-  }
-  glGenTextures(1, &tex_lighting);
-  glBindTexture(GL_TEXTURE_RECTANGLE, tex_randnorm);
-  glTexImage2D(GL_TEXTURE_RECTANGLE, 0, GL_RGB8, 0x100, 0x100, 0, GL_RGB, GL_UNSIGNED_BYTE, buf);
-  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_S, GL_REPEAT);
-  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_T, GL_REPEAT);
-  glBindTexture(GL_TEXTURE_RECTANGLE, 0);
-  free(buf);
 
   /* create uniform buffer objects */
   glGenBuffers(1, &ubo_envlight);
@@ -343,6 +329,42 @@ void kl_gl3_end_pass_gbuffer() {
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0); 
   }
 
+  glUseProgram(upsample_program);
+  glBindVertexArray(vao_quad);
+
+  glEnable(GL_BLEND);
+  glBlendFunc(GL_ONE, GL_ONE);
+
+  for (int i=4; i >= 0; i--) {
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, ssao_fbo[i]);
+    unsigned int attachments[] = {GL_COLOR_ATTACHMENT0};
+    glDrawBuffers(1, attachments);
+
+    glUniform1i(upsample_uniform_tdepth, 0);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_RECTANGLE, gbuffer_tex_depth[i]);
+
+    glUniform1i(upsample_uniform_tnormal, 1);
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_RECTANGLE, gbuffer_tex_normal[i]);
+
+    glUniform1i(upsample_uniform_tsdepth, 2);
+    glActiveTexture(GL_TEXTURE2);
+    glBindTexture(GL_TEXTURE_RECTANGLE, gbuffer_tex_depth[i+1]);
+
+    glUniform1i(upsample_uniform_tsnormal, 3);
+    glActiveTexture(GL_TEXTURE3);
+    glBindTexture(GL_TEXTURE_RECTANGLE, gbuffer_tex_normal[i+1]);
+
+    glUniform1i(upsample_uniform_tocclusion, 4);
+    glActiveTexture(GL_TEXTURE4);
+    glBindTexture(GL_TEXTURE_RECTANGLE, ssao_tex_occlusion[i+1]);
+
+    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0); 
+  }
+
+  glDisable(GL_BLEND);
+
   glBindVertexArray(0);
   glUseProgram(0);
 
@@ -408,9 +430,9 @@ void kl_gl3_begin_pass_lighting() {
   glActiveTexture(GL_TEXTURE4);
   glBindTexture(GL_TEXTURE_RECTANGLE, gbuffer_tex_emissive);
 
-  glUniform1i(envlight_uniform_trandnorm, 5);
+  glUniform1i(envlight_uniform_tocclusion, 5);
   glActiveTexture(GL_TEXTURE5);
-  glBindTexture(GL_TEXTURE_RECTANGLE, tex_randnorm);
+  glBindTexture(GL_TEXTURE_RECTANGLE, ssao_tex_occlusion[0]);
 
   glBindVertexArray(vao_pquad);
   glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
@@ -928,7 +950,8 @@ static int init_ssao(int width, int height) {
   int h = height;
   for (int i=0; i < 6; i++) {
     glBindTexture(GL_TEXTURE_RECTANGLE, ssao_tex_occlusion[i]);
-    glTexImage2D(GL_TEXTURE_RECTANGLE, 0, GL_RG16, w, h, 0, GL_RED, GL_UNSIGNED_SHORT, NULL);
+    //glTexImage2D(GL_TEXTURE_RECTANGLE, 0, GL_R8, w, h, 0, GL_RED, GL_UNSIGNED_BYTE, NULL);
+    glTexImage2D(GL_TEXTURE_RECTANGLE, 0, GL_R16F, w, h, 0, GL_RED, GL_FLOAT, NULL);
     glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -960,6 +983,17 @@ static int init_ssao(int width, int height) {
 
   ssao_uniform_tdepth  = glGetUniformLocation(ssao_program, "tdepth");
   ssao_uniform_tnormal = glGetUniformLocation(ssao_program, "tnormal");
+
+  if (create_shader("upsampling vertex shader", GL_VERTEX_SHADER, vshader_upsample_src, &upsample_vshader) < 0) return -1;
+  if (create_shader("upsampling fragment shader", GL_FRAGMENT_SHADER, fshader_upsample_src, &upsample_fshader) < 0) return -1;
+  if (create_program("upsampling shader program", upsample_vshader, upsample_fshader, &upsample_program) < 0) return -1;
+
+  upsample_uniform_tdepth     = glGetUniformLocation(upsample_program, "tdepth");
+  upsample_uniform_tnormal    = glGetUniformLocation(upsample_program, "tnormal");
+  upsample_uniform_tsdepth    = glGetUniformLocation(upsample_program, "tsdepth");
+  upsample_uniform_tsnormal   = glGetUniformLocation(upsample_program, "tsnormal");
+  upsample_uniform_tocclusion = glGetUniformLocation(upsample_program, "tocclusion");
+
   return 0;
 }
 
@@ -1041,12 +1075,12 @@ static int init_lighting(int width, int height) {
 
   bind_ubo(envlight_program, "scene", 0);
   bind_ubo(envlight_program, "envlight", 1);
-  envlight_uniform_tdepth    = glGetUniformLocation(envlight_program, "tdepth");
-  envlight_uniform_tdiffuse  = glGetUniformLocation(envlight_program, "tdiffuse");
-  envlight_uniform_tnormal   = glGetUniformLocation(envlight_program, "tnormal");
-  envlight_uniform_tspecular = glGetUniformLocation(envlight_program, "tspecular");
-  envlight_uniform_temissive = glGetUniformLocation(envlight_program, "temissive");
-  envlight_uniform_trandnorm = glGetUniformLocation(envlight_program, "trandnorm");
+  envlight_uniform_tdepth     = glGetUniformLocation(envlight_program, "tdepth");
+  envlight_uniform_tdiffuse   = glGetUniformLocation(envlight_program, "tdiffuse");
+  envlight_uniform_tnormal    = glGetUniformLocation(envlight_program, "tnormal");
+  envlight_uniform_tspecular  = glGetUniformLocation(envlight_program, "tspecular");
+  envlight_uniform_temissive  = glGetUniformLocation(envlight_program, "temissive");
+  envlight_uniform_tocclusion = glGetUniformLocation(envlight_program, "tocclusion");
 
   return 0;
 }

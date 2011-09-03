@@ -124,9 +124,49 @@ static const char *fshader_ssao_src =
 "    vec3  occluder_offset = vec3(sample_offsets[i], depth - occluder_depth);\n" /* offset in eye-space */
 "    vec3  dir  = normalize(occluder_offset);\n"
 "    float dist = length(occluder_offset);\n"
-"    occlusion += 1.0 - max(0.0, dot(dir, normal)) / sqrt(1.0 + dist * dist);\n"
+"    occlusion += max(0.0, dot(dir, normal)) / sqrt(1.0 + dist * dist);\n"
 "  };\n"
 "  ssao = occlusion / 8.0;\n"
+"}\n";
+
+static const char *vshader_upsample_src =
+"#version 330\n"
+"layout(location = 0) in vec2 vcoord;\n"
+"void main () {\n"
+"  gl_Position = vec4(vcoord, 0.0, 1.0);\n"
+"}\n";
+
+static const char *fshader_upsample_src =
+"#version 330\n"
+"uniform sampler2DRect tdepth;\n"
+"uniform sampler2DRect tnormal;\n"
+"uniform sampler2DRect tsdepth;\n"
+"uniform sampler2DRect tsnormal;\n"
+"uniform sampler2DRect tocclusion;\n"
+"layout(location = 0) out float ssao;\n"
+"void main() {\n"
+"  vec2 coord[4] = vec2[](\n"
+"    gl_FragCoord.xy / 2.0 + vec2(-0.5, -0.5),\n"
+"    gl_FragCoord.xy / 2.0 + vec2( 0.5, -0.5),\n"
+"    gl_FragCoord.xy / 2.0 + vec2(-0.5,  0.5),\n"
+"    gl_FragCoord.xy / 2.0 + vec2( 0.5,  0.5)\n"
+"  );\n"
+"  float depth = texture(tdepth, gl_FragCoord.xy).r;\n"
+"  vec3 normal;\n"
+"  normal.xy = texture(tnormal, gl_FragCoord.xy).rg;\n"
+"  normal.z  = sqrt(1.0 - dot(normal.xy, normal.xy));\n"
+"  float total = 0.0;\n"
+"  float value = 0.0;\n"
+"  for (int i=0; i < 4; i++) {\n"
+"    float sample_depth = texture(tsdepth, coord[i]).r;\n"
+"    vec3 sample_normal;\n"
+"    sample_normal.xy = texture(tsnormal, coord[i]).rg;\n"
+"    sample_normal.z  = sqrt(1.0 - dot(sample_normal.xy, sample_normal.xy));\n"
+"    float scale = max(0.0, dot(normal, sample_normal)) / pow(abs(sample_depth - depth) + 1.0, 4.0);\n"
+"    value += scale * texture(tocclusion, coord[i]).r;\n"
+"    total += scale;\n"
+"  }\n"
+"  ssao = value / total;\n"
 "}\n";
 
 static const char *vshader_minimal_src = 
@@ -236,21 +276,21 @@ static const char *fshader_envlight_src =
 "uniform sampler2DRect tdiffuse;\n"
 "uniform sampler2DRect tspecular;\n"
 "uniform sampler2DRect temissive;\n"
-"uniform sampler2DRect trandnorm;\n"
+"uniform sampler2DRect tocclusion;\n"
 "smooth in vec3 fray_eye;\n"
 "smooth in vec3 fray_world;\n"
 "smooth in vec2 ftexcoord;\n"
 "layout(location = 0) out vec4 color;\n"
 "void main () {\n"
 "  float depth = texture(tdepth, gl_FragCoord.xy).r;\n"
-"  vec3  coord = fray_eye * depth;\n"
-//"  vec3  coord = fray_world * depth + viewpos;\n"
+"  vec3  coord_eye = fray_eye * depth;\n"
+"  vec3  coord_world = fray_world * depth + viewpos;\n"
 ""
 "  vec3 norm;\n"
 "  norm.xy = texture(tnormal, gl_FragCoord.xy).xy;\n"
 "  norm.z  = sqrt(1.0 - dot(norm.xy, norm.xy));\n"
 ""
-"  float occlusion = 0.0;\n"
+"  float occlusion = pow(1.0 - texture(tocclusion, gl_FragCoord.xy).r / 6.0, 4.0);\n"
 ""
 "  vec3 lightdir = normalize(viewrot * -light.direction.xyz);\n"
 "  vec3 eyedir   = -normalize(fray_eye);\n"
@@ -262,7 +302,7 @@ static const char *fshader_envlight_src =
 "  color.rgb += diff * max(0.0, dot(norm, lightdir));\n" /* diffuse */
 "  color.rgb += spec.rgb * pow(max(0.0, dot(reflect, eyedir)), spec.a*255.0);\n" /* specular */
 "  color.rgb *= light.color.rgb * light.color.a;\n" /* diffuse/specular scale */
-"  color.rgb += diff * light.ambient.rgb * light.ambient.a * (1.0 - occlusion);\n" /* ambient */
+"  color.rgb += diff * light.ambient.rgb * light.ambient.a * occlusion;\n" /* ambient */
 "  color.rgb += glow.rgb * exp2(glow.a * 16.0 - 8.0);\n" /* emissive */
 "  color.a    = 1.0;\n"
 "}\n";
