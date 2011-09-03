@@ -83,6 +83,52 @@ static const char *fshader_downsample_src =
 "  gnormal = normalize(normal).xy;\n"
 "}\n";
 
+static const char *vshader_ssao_src = 
+"#version 330\n"
+"layout(location = 0) in vec2 vcoord;\n"
+"layout(location = 1) in vec3 vray_eye;\n"
+"layout(location = 2) in vec3 vray_world;\n"
+"smooth out vec3 fray_eye;\n"
+"void main () {\n"
+"  fray_eye    = vray_eye;\n"
+"  gl_Position = vec4(vcoord, 0.0, 1.0);\n"
+"}\n";
+
+static const char *fshader_ssao_src = 
+"#version 330\n"
+"uniform sampler2DRect tdepth;\n"
+"uniform sampler2DRect tnormal;\n"
+"smooth in vec3 fray_eye;\n"
+"layout(location = 0) out float ssao;\n"
+"void main() {\n"
+"  float depth = texture(tdepth, gl_FragCoord.xy).r;\n"
+"  vec3  coord = fray_eye * depth;\n"
+"  vec3  normal;\n"
+"  normal.xy = texture(tnormal, gl_FragCoord.xy).rg;\n"
+"  normal.z  = sqrt(1.0 - dot(normal.xy, normal.xy));\n"
+""
+"  float screen_scale = clamp(256.0 / (depth + 64.0), 1.0, 4.0);\n"
+"  vec2  sample_offsets[8] = vec2[](\n" /* eye-space x/y offsets */
+"    vec2(-1.0,  0.0),\n"
+"    vec2( 1.0,  0.0),\n"
+"    vec2( 0.0, -1.0),\n"
+"    vec2( 0.0,  1.0),\n"
+"    vec2(-1.0, -1.0),\n"
+"    vec2(-1.0,  1.0),\n"
+"    vec2( 1.0, -1.0),\n"
+"    vec2( 1.0,  1.0)\n"
+"  );\n"
+"  float occlusion = 0.0;\n"
+"  for (int i=0; i < 8; i++) {\n"
+"    float occluder_depth  = texture(tdepth, sample_offsets[i] * screen_scale + gl_FragCoord.xy).r;\n"
+"    vec3  occluder_offset = vec3(sample_offsets[i], depth - occluder_depth);\n" /* offset in eye-space */
+"    vec3  dir  = normalize(occluder_offset);\n"
+"    float dist = length(occluder_offset);\n"
+"    occlusion += 1.0 - max(0.0, dot(dir, normal)) / sqrt(1.0 + dist * dist);\n"
+"  };\n"
+"  ssao = occlusion / 8.0;\n"
+"}\n";
+
 static const char *vshader_minimal_src = 
 "#version 330\n"
 "uniform mat4 mvpmatrix;\n"

@@ -25,10 +25,11 @@ static int typesize(int value);
 static int channels(int value);
 static int create_shader(char *name, int type, const char *src, unsigned int *shader);
 static int create_program(char *name, unsigned int vshader, unsigned int fshader, unsigned int *program);
-static int init_gbuffer(int w, int h);
+static int init_gbuffer(int width, int height);
+static int init_ssao(int width, int height);
 static int init_blit();
 static int init_minimal();
-static int init_lighting(int w, int h);
+static int init_lighting(int width, int height);
 static int init_tonemap();
 static void blit_to_screen(unsigned int texture, float w, float h, float x, float y);
 static void bind_ubo(unsigned int program, char *name, unsigned int binding);
@@ -62,8 +63,13 @@ static int downsample_uniform_tdepth;
 static int downsample_uniform_tnormal;
 static unsigned int downsample_fbo[5];
 
-static unsigned int ssao_tex_occlusion;
-static unsigned int ssao_fbo;
+static unsigned int ssao_vshader;
+static unsigned int ssao_fshader;
+static unsigned int ssao_program;
+static int ssao_uniform_tdepth;
+static int ssao_uniform_tnormal;
+static unsigned int ssao_tex_occlusion[6];
+static unsigned int ssao_fbo[6];
 
 /* "minimal" shader program with no fragment output (used for stencil masks) */
 static unsigned int minimal_vshader;
@@ -188,6 +194,7 @@ int kl_gl3_init() {
 
   /* create shader programs */
   if (init_gbuffer(w, h) < 0) return -1;
+  if (init_ssao(w, h) < 0) return -1;
   if (init_minimal() < 0) return -1;
   if (init_lighting(w, h) < 0) return -1;
   if (init_tonemap() < 0) return -1;
@@ -296,7 +303,7 @@ void kl_gl3_end_pass_gbuffer() {
   glDisable(GL_DEPTH_TEST);
   glDisable(GL_CULL_FACE);
 
-  /* downsample the normal and depth buffers for use in MSSAO */
+  /* downsample the normal and depth buffers */
   glUseProgram(downsample_program);
   glBindVertexArray(vao_quad);
 
@@ -310,6 +317,26 @@ void kl_gl3_end_pass_gbuffer() {
     glBindTexture(GL_TEXTURE_RECTANGLE, gbuffer_tex_depth[i]);
 
     glUniform1i(downsample_uniform_tnormal, 1);
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_RECTANGLE, gbuffer_tex_normal[i]);
+
+    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0); 
+  }
+
+  /* render MSSAO */
+  glUseProgram(ssao_program);
+  glBindVertexArray(vao_pquad);
+
+  for (int i=0; i < 6; i++) {
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, ssao_fbo[i]);
+    unsigned int attachments[] = {GL_COLOR_ATTACHMENT0};
+    glDrawBuffers(1, attachments);
+
+    glUniform1i(ssao_uniform_tdepth, 0);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_RECTANGLE, gbuffer_tex_depth[i]);
+
+    glUniform1i(ssao_uniform_tnormal, 1);
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_RECTANGLE, gbuffer_tex_normal[i]);
 
@@ -513,25 +540,35 @@ void kl_gl3_composite() {
 void kl_gl3_debugtex(int mode) {
   switch (mode) {
     case 0:
-      blit_to_screen(gbuffer_tex_depth[0],  0.18, 0.18, -0.78, -0.8);
-      blit_to_screen(gbuffer_tex_normal[0], 0.18, 0.18, -0.39, -0.8);
-      blit_to_screen(gbuffer_tex_diffuse,   0.18, 0.18, -0.0,  -0.8);
-      blit_to_screen(gbuffer_tex_specular,  0.18, 0.18,  0.39, -0.8);
-      blit_to_screen(gbuffer_tex_emissive,  0.18, 0.18,  0.78, -0.8);
+      blit_to_screen(gbuffer_tex_depth[0],  0.18, 0.18, -0.78, -0.785);
+      blit_to_screen(gbuffer_tex_normal[0], 0.18, 0.18, -0.39, -0.785);
+      blit_to_screen(gbuffer_tex_diffuse,   0.18, 0.18,  0.0,  -0.785);
+      blit_to_screen(gbuffer_tex_specular,  0.18, 0.18,  0.39, -0.785);
+      blit_to_screen(gbuffer_tex_emissive,  0.18, 0.18,  0.78, -0.785);
       break;
     case 1:
-      blit_to_screen(gbuffer_tex_depth[1], 0.18, 0.18, -0.78, -0.8);
-      blit_to_screen(gbuffer_tex_depth[2], 0.18, 0.18, -0.39, -0.8);
-      blit_to_screen(gbuffer_tex_depth[3], 0.18, 0.18, -0.0,  -0.8);
-      blit_to_screen(gbuffer_tex_depth[4], 0.18, 0.18,  0.39, -0.8);
-      blit_to_screen(gbuffer_tex_depth[5], 0.18, 0.18,  0.78, -0.8);
+      blit_to_screen(gbuffer_tex_depth[0], 0.15, 0.15, -0.833, -0.8);
+      blit_to_screen(gbuffer_tex_depth[1], 0.15, 0.15, -0.500, -0.8);
+      blit_to_screen(gbuffer_tex_depth[2], 0.15, 0.15, -0.166, -0.8);
+      blit_to_screen(gbuffer_tex_depth[3], 0.15, 0.15,  0.166, -0.8);
+      blit_to_screen(gbuffer_tex_depth[4], 0.15, 0.15,  0.500, -0.8);
+      blit_to_screen(gbuffer_tex_depth[5], 0.15, 0.15,  0.833, -0.8);
       break;
     case 2:
-      blit_to_screen(gbuffer_tex_normal[1], 0.18, 0.18, -0.78, -0.8);
-      blit_to_screen(gbuffer_tex_normal[2], 0.18, 0.18, -0.39, -0.8);
-      blit_to_screen(gbuffer_tex_normal[3], 0.18, 0.18, -0.0,  -0.8);
-      blit_to_screen(gbuffer_tex_normal[4], 0.18, 0.18,  0.39, -0.8);
-      blit_to_screen(gbuffer_tex_normal[5], 0.18, 0.18,  0.78, -0.8);
+      blit_to_screen(gbuffer_tex_normal[0], 0.15, 0.15, -0.833, -0.8);
+      blit_to_screen(gbuffer_tex_normal[1], 0.15, 0.15, -0.500, -0.8);
+      blit_to_screen(gbuffer_tex_normal[2], 0.15, 0.15, -0.166, -0.8);
+      blit_to_screen(gbuffer_tex_normal[3], 0.15, 0.15,  0.166, -0.8);
+      blit_to_screen(gbuffer_tex_normal[4], 0.15, 0.15,  0.500, -0.8);
+      blit_to_screen(gbuffer_tex_normal[5], 0.15, 0.15,  0.833, -0.8);
+      break;
+    case 3:
+      blit_to_screen(ssao_tex_occlusion[0], 0.15, 0.15, -0.833, -0.8);
+      blit_to_screen(ssao_tex_occlusion[1], 0.15, 0.15, -0.500, -0.8);
+      blit_to_screen(ssao_tex_occlusion[2], 0.15, 0.15, -0.166, -0.8);
+      blit_to_screen(ssao_tex_occlusion[3], 0.15, 0.15,  0.166, -0.8);
+      blit_to_screen(ssao_tex_occlusion[4], 0.15, 0.15,  0.500, -0.8);
+      blit_to_screen(ssao_tex_occlusion[5], 0.15, 0.15,  0.833, -0.8);
       break;
   }
 }
@@ -792,8 +829,8 @@ static int init_gbuffer(int width, int height) {
   for (int i=0; i < 6; i++) {
     glBindTexture(GL_TEXTURE_RECTANGLE, gbuffer_tex_depth[i]);
     glTexImage2D(GL_TEXTURE_RECTANGLE, 0, GL_R32F, w, h, 0, GL_RED, GL_FLOAT, NULL);
-    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_SWIZZLE_R, GL_RED);
@@ -802,8 +839,8 @@ static int init_gbuffer(int width, int height) {
 
     glBindTexture(GL_TEXTURE_RECTANGLE, gbuffer_tex_normal[i]);
     glTexImage2D(GL_TEXTURE_RECTANGLE, 0, GL_RG16F, w, h, 0, GL_RG, GL_UNSIGNED_SHORT, NULL);
-    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
@@ -813,22 +850,22 @@ static int init_gbuffer(int width, int height) {
 
   glBindTexture(GL_TEXTURE_RECTANGLE, gbuffer_tex_diffuse);
   glTexImage2D(GL_TEXTURE_RECTANGLE, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
-  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
   glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
   glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
   glBindTexture(GL_TEXTURE_RECTANGLE, gbuffer_tex_specular);
   glTexImage2D(GL_TEXTURE_RECTANGLE, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
-  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
   glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
   glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
   glBindTexture(GL_TEXTURE_RECTANGLE, gbuffer_tex_emissive);
   glTexImage2D(GL_TEXTURE_RECTANGLE, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
-  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
   glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
   glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
@@ -884,6 +921,48 @@ static int init_gbuffer(int width, int height) {
   return 0;
 }
 
+static int init_ssao(int width, int height) {
+  glGenTextures(6, ssao_tex_occlusion);
+
+  int w = width;
+  int h = height;
+  for (int i=0; i < 6; i++) {
+    glBindTexture(GL_TEXTURE_RECTANGLE, ssao_tex_occlusion[i]);
+    glTexImage2D(GL_TEXTURE_RECTANGLE, 0, GL_RG16, w, h, 0, GL_RED, GL_UNSIGNED_SHORT, NULL);
+    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_SWIZZLE_R, GL_RED);
+    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_SWIZZLE_G, GL_RED);
+    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_SWIZZLE_B, GL_RED);
+
+    w >>= 1;
+    h >>= 1;
+  }
+  glBindTexture(GL_TEXTURE_RECTANGLE, 0);
+
+  glGenFramebuffers(6, ssao_fbo);
+  for (int i=0; i<6; i++) {
+    glBindFramebuffer(GL_FRAMEBUFFER, ssao_fbo[i]);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_RECTANGLE, ssao_tex_occlusion[i], 0);
+    int status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    if (status != GL_FRAMEBUFFER_COMPLETE) {
+      fprintf(stderr, "Render: Occlusion buffer is incomplete.\n\tDetails: %x\n", status);
+      return -1;
+    }
+  }
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+  if (create_shader("ssao vertex shader", GL_VERTEX_SHADER, vshader_ssao_src, &ssao_vshader) < 0) return -1;
+  if (create_shader("ssao fragment shader", GL_FRAGMENT_SHADER, fshader_ssao_src, &ssao_fshader) < 0) return -1;
+  if (create_program("ssao shader program", ssao_vshader, ssao_fshader, &ssao_program) < 0) return -1;
+
+  ssao_uniform_tdepth  = glGetUniformLocation(ssao_program, "tdepth");
+  ssao_uniform_tnormal = glGetUniformLocation(ssao_program, "tnormal");
+  return 0;
+}
+
 static int init_blit() {
   /* screen blitting shader program */
   if (create_shader("screen vertex shader", GL_VERTEX_SHADER, vshader_blit_src, &blit_vshader) < 0) return -1;
@@ -922,10 +1001,10 @@ static int init_minimal() {
   return 0;
 }
 
-static int init_lighting(int w, int h) {
+static int init_lighting(int width, int height) {
   glGenTextures(1, &tex_lighting);
   glBindTexture(GL_TEXTURE_RECTANGLE, tex_lighting);
-  glTexImage2D(GL_TEXTURE_RECTANGLE, 0, GL_RGBA16F, w, h, 0, GL_RGBA, GL_FLOAT, NULL);
+  glTexImage2D(GL_TEXTURE_RECTANGLE, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, NULL);
   glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
   glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
   glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
