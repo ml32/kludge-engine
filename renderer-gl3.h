@@ -22,7 +22,7 @@ void kl_gl3_end_pass_debug();
 void kl_gl3_draw_pass_debug(kl_mat4f_t *mvpmatrix, float r, float g, float b);
 
 void kl_gl3_composite(); /* apply tonemapping, postprocessing, and output to screen */
-void kl_gl3_debugtex(); /* show output of the g-buffer */
+void kl_gl3_debugtex(int mode); /* show output of various buffers */
 
 unsigned int kl_gl3_upload_vertdata(void *data, int n);
 void kl_gl3_update_vertdata(unsigned int vbo, void *data, int n);

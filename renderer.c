@@ -22,6 +22,8 @@ static void draw_bounds(kl_bvh_node_t *node, kl_scene_t *scene);
 static kl_bvh_node_t *bvh_models = NULL;
 static kl_bvh_node_t *bvh_lights = NULL;
 
+static int debugmode = 0;
+
 /* ------------------------- */
 int kl_render_init() {
   return kl_gl3_init();
@@ -50,7 +52,11 @@ void kl_render_draw(kl_camera_t *cam) {
 
   kl_gl3_composite();
 
-  kl_gl3_debugtex();
+  kl_gl3_debugtex(debugmode);
+}
+
+void kl_render_set_debug(int mode) {
+  debugmode = mode;
 }
 
 void kl_render_add_model(kl_model_t* model) {
@@ -130,18 +136,10 @@ static void draw_light(light_t *light, kl_scene_t *scene) {
 }
 
 static void draw_bounds(kl_bvh_node_t *node, kl_scene_t *scene) {
-  static float colors[] = {
-    0.25f, 1.0f, 0.0f,
-    1.0f,  0.5f, 0.0f,
-    0.0f,  1.0f, 0.5f,
-    0.5f,  0.0f, 1.0f,
-  };
-  static int colori = 0;
 
-  float r = colors[3*colori + 0];
-  float g = colors[3*colori + 1];
-  float b = colors[3*colori + 2];
-  colori = (colori + 1) % 4;;
+  float r = 1.0f;
+  float g = 0.5f;
+  float b = 0.0f;
 
   kl_vec3f_t position = node->header.bounds.center;
   float      radius   = node->header.bounds.radius;
