@@ -1,3 +1,5 @@
+#define _BSD_SOURCE /* need strsep() */
+
 #include "model-obj.h"
 
 #include "model.h"
@@ -5,8 +7,8 @@
 #include "array.h"
 
 #include <stdint.h>
+#include <string.h>
 #include <stdio.h>
-#include <bstrlib.h>
 
 /* Wavefront OBJ doesn't have a magic number so I'm making one up */
 #define OBJ_MAGIC 0x4a424f23 
@@ -30,9 +32,9 @@ typedef struct bufinfo {
 } bufinfo_t;
 
 typedef struct obj_face_vert {
-  unsigned int posidx;
-  unsigned int normidx;
-  unsigned int texidx;
+  int posidx;
+  int normidx;
+  int texidx;
 } obj_face_vert_t;
 
 #define FACE_MAXVERTS 8
@@ -42,7 +44,6 @@ typedef struct obj_face {
 } obj_face_t;
 
 typedef struct obj_data {
-  int lineno;
   /* raw entries, as written in the obj file */
   kl_array_t rawposition, rawnormal, rawtexcoord, rawtris;
   /* maps from separate position/normal/texcoord indices to combined vertex data: */
@@ -54,15 +55,12 @@ typedef struct obj_data {
 static void objdata_init(obj_data_t *data);
 static void objdata_free(obj_data_t *data);
 static int  objdata_getvertidx(obj_data_t *objdata, obj_face_vert_t *vert);
-static size_t readbuf(void *buff, size_t elsize, size_t nelem, void *parm);
-static int parselinecb(void *parm, int ofs, const_bstring entry);
-static int parsefacevert(bstring bstr, obj_face_vert_t *dst);
-static int bstrtoint(bstring bstr);
-static float bstrtofloat(bstring bstr);
-
-static struct tagbstring linedelim  = bsStatic("\n");
-static struct tagbstring facedelim  = bsStatic("/");
-static struct tagbstring whitespace = bsStatic("\n\t\r ");
+static int parseline(obj_data_t *objdata, char *line);
+static int parsevertex(obj_data_t *objdata, char *line);
+static int parsenormal(obj_data_t *objdata, char *line);
+static int parsetexcoord(obj_data_t *objdata, char *line);
+static int parseface(obj_data_t *objdata, char *line);
+static int parsefacevert(char *str, obj_face_vert_t *dst);
 
 /* ------------------------ */
 int kl_model_isobj(uint8_t *data, int size) {
@@ -74,21 +72,27 @@ int kl_model_isobj(uint8_t *data, int size) {
 kl_model_t* kl_model_loadobj(uint8_t *data, int size) {
   kl_model_t *model = NULL;
 
-  bufinfo_t buf = {
-    .start = data,
-    .end   = data + size,
-    .cur   = data
-  };
-  struct bStream *stream = bsopen(&readbuf, &buf);
-  
   obj_data_t objdata;
   objdata_init(&objdata);
 
   /* load data from file */
-  if (bssplitscb(stream, (const_bstring)&linedelim, parselinecb, &objdata) < 0) {
-    fprintf(stderr, "Mesh-OBJ: Failed to read lines from file!\n");
-    goto cleanup;
-  }
+  char *buf  = malloc(size+1);
+  memcpy(buf, data, size);
+  buf[size] = '\0';
+
+  char *cur = buf;
+  char *line;
+  do {
+    line = strsep(&cur, "\n\r");
+    if (parseline(&objdata, line) < 0) goto cleanup;
+  } while (cur != NULL);
+  free(buf);
+
+  printf("verts: %d\nnorms: %d\ntexcoords: %d\nfaces: %d\n",
+    kl_array_size(&objdata.rawposition),
+    kl_array_size(&objdata.rawnormal),
+    kl_array_size(&objdata.rawtexcoord),
+    kl_array_size(&objdata.rawtris));
 
   /* initialize vert index mappings */
   indexmap_t blankmap = { .n = 0 };
@@ -206,22 +210,7 @@ kl_model_t* kl_model_loadobj(uint8_t *data, int size) {
 }
 
 /* -------------------- */
-static size_t readbuf(void *buff, size_t elsize, size_t nelem, void *parm) {
-  bufinfo_t *buf = parm;
-  uint8_t *dst = buff;
-
-  for (int i=0; i < nelem; i++) {
-    if (buf->cur + elsize > buf->end) return i;
-    memcpy(dst, buf->cur, elsize);
-    dst += elsize;
-    buf->cur += elsize;
-  }
-
-  return nelem;
-}
-
 static void objdata_init(obj_data_t *data) {
-  data->lineno = 1;
   kl_array_init(&data->rawposition, sizeof(kl_vec3f_t));
   kl_array_init(&data->rawnormal,   sizeof(kl_vec3f_t));
   kl_array_init(&data->rawtexcoord, sizeof(kl_vec2f_t));
@@ -265,9 +254,23 @@ static int objdata_getvertidx(obj_data_t *objdata, obj_face_vert_t *vert) {
   kl_vec3f_t normal;
   kl_vec4f_t tangent = { .x = 0.0f, .y = 0.0f, .z = 0.0f, .w = 1.0f };
   kl_vec2f_t texcoord;
+
   kl_array_get(&objdata->rawposition, vert->posidx,  &position);
-  kl_array_get(&objdata->rawnormal,   vert->normidx, &normal);
-  kl_array_get(&objdata->rawtexcoord, vert->texidx,  &texcoord);
+  if (vert->normidx >= 0) {
+    kl_array_get(&objdata->rawnormal,   vert->normidx, &normal);
+  } else {
+    /* todo: construct default normal from face verts */
+    normal.x = 0.0f;
+    normal.y = 0.0f;
+    normal.z = 1.0f;
+  }
+  if (vert->texidx >= 0) {
+    kl_array_get(&objdata->rawtexcoord, vert->texidx,  &texcoord);
+  } else {
+    /* todo: better default texture projection based on face normals */
+    texcoord.x = position.x;
+    texcoord.y = position.y;
+  }
   
   int vertidx = kl_array_push(&objdata->bufposition, &position);
   kl_array_set_expand(&objdata->bufnormal,   vertidx, &normal);
@@ -283,125 +286,101 @@ static int objdata_getvertidx(obj_data_t *objdata, obj_face_vert_t *vert) {
   return vertidx;
 }
 
-static int parselinecb(void *parm, int ofs, const_bstring entry) {
-  obj_data_t *objdata = parm;
-  int ret = 0;
+static int parseline(obj_data_t *objdata, char *line) {
+  switch (line[0]) {
+    case 'v':
+      switch (line[1]) {
+        case 't':
+          return parsetexcoord(objdata, line);
+        case 'n':
+          return parsenormal(objdata, line);
+        default:
+          return parsevertex(objdata, line);
+      }
+      break;
+    case 'f':
+      return parseface(objdata, line);
+  }
+  return 0;
+}
 
-  if (entry->slen < 1 || entry->data[0] == '#') {
-    objdata->lineno++;
+static int parsevertex(obj_data_t *objdata, char *line) {
+  kl_vec3f_t position;
+  if (sscanf(line, "v %f %f %f", &position.x, &position.y, &position.z) < 3) {
+    fprintf(stderr, "Mesh-OBJ: Failed to read vertex coordinate!\n");
+    return -1;
+  }
+  kl_array_push(&objdata->rawposition, &position);
+  return 0;
+} 
+
+static int parsenormal(obj_data_t *objdata, char *line) {
+  kl_vec3f_t normal;
+  if (sscanf(line, "vn %f %f %f", &normal.x, &normal.y, &normal.z) < 3) {
+    fprintf(stderr, "Mesh-OBJ: Failed to read vertex normal!\n");
+    return -1;
+  }
+  kl_array_push(&objdata->rawnormal, &normal);
+  return 0;
+}
+ 
+static int parsetexcoord(obj_data_t *objdata, char *line) {
+  kl_vec2f_t texcoord;
+  if (sscanf(line, "vt %f %f", &texcoord.x, &texcoord.y) < 2) {
+    fprintf(stderr, "Mesh-OBJ: Failed to read texture coordinate!\n");
+    return -1;
+  }
+  kl_array_push(&objdata->rawtexcoord, &texcoord);
+  return 0;
+}
+
+static int parseface(obj_data_t *objdata, char *line) {
+  obj_face_t face;
+  face.num_verts = 0;
+
+  char *str = line + 1;
+  char *vertstr;
+  do {
+    vertstr = strsep(&str, " \t");
+    if (parsefacevert(vertstr, &face.vert[face.num_verts]) < 0) continue;
+    if (++face.num_verts >= FACE_MAXVERTS) break;
+  } while (str != NULL);
+  if (face.num_verts < 3) {
+    fprintf(stderr, "Mesh-OBJ: Too few vertices for polygon! (invalid format?)\n");
+    return -1;
+  }
+  
+  kl_array_push(&objdata->rawtris, &face);
+  return 0;
+}
+
+static int parsefacevert(char *str, obj_face_vert_t *dst) {
+  if (sscanf(str, "%d/%d/%d", &dst->posidx, &dst->texidx, &dst->normidx) == 3) {
+    dst->posidx--;
+    dst->texidx--;
+    dst->normidx--;
+    return 0;
+  }
+  if (sscanf(str, "%d/%d", &dst->posidx, &dst->texidx) == 2) {
+    dst->posidx--;
+    dst->texidx--;
+    dst->normidx = -1;
+    return 0;
+  }
+  if (sscanf(str, "%d//%d", &dst->posidx, &dst->normidx) == 2) {
+    dst->posidx--;
+    dst->texidx = -1;
+    dst->normidx--;
+    return 0;
+  }
+  if (sscanf(str, "%d", &dst->posidx) == 1) {
+    dst->posidx--;
+    dst->normidx = -1;
+    dst->texidx  = -1;
     return 0;
   }
 
-  struct bstrList *list = bsplits(entry, (const_bstring)&whitespace);
-
-  if (list->qty >= 1) {
-    bstring def = list->entry[0];
-    if (biseqcstr(def, "v")) {
-      if (list->qty < 4) {
-        fprintf(stderr, "Mesh-OBJ: Too few components for vertex coordinate! (line %d)\n", objdata->lineno);
-        ret = -1;
-      } else {
-        kl_vec3f_t position;
-
-        bstring entry;
-        int i = 1;
-        do { entry = list->entry[i]; i++; } while (entry->slen <= 0);
-        position.x = bstrtofloat(entry);
-        do { entry = list->entry[i]; i++; } while (entry->slen <= 0);
-        position.y = bstrtofloat(entry);
-        do { entry = list->entry[i]; i++; } while (entry->slen <= 0);
-        position.z = bstrtofloat(entry);
-
-        kl_array_push(&objdata->rawposition, &position);
-      }
-    } else if (biseqcstr(def, "vt")) {
-      if (list->qty < 3) {
-        fprintf(stderr, "Mesh-OBJ: Too few components for texture coordinate! (line %d)\n", objdata->lineno);
-        ret = -1;
-      } else {
-        kl_vec2f_t texcoord;
-
-        bstring entry;
-        int i = 1;
-        do { entry = list->entry[i]; i++; } while (entry->slen <= 0);
-        texcoord.x = bstrtofloat(entry);
-        do { entry = list->entry[i]; i++; } while (entry->slen <= 0);
-        texcoord.y = bstrtofloat(entry);
-
-        kl_array_push(&objdata->rawtexcoord, &texcoord);
-      }
-    } else if (biseqcstr(def, "vn")) {
-      if (list->qty < 4) {
-        fprintf(stderr, "Mesh-OBJ: Too few components for vertex normal! (line %d)\n", objdata->lineno);
-        ret = -1;
-      } else {
-        kl_vec3f_t normal;
-
-        bstring entry;
-        int i = 1;
-        do { entry = list->entry[i]; i++; } while (entry->slen <= 0);
-        normal.x = bstrtofloat(entry);
-        do { entry = list->entry[i]; i++; } while (entry->slen <= 0);
-        normal.y = bstrtofloat(entry);
-        do { entry = list->entry[i]; i++; } while (entry->slen <= 0);
-        normal.z = bstrtofloat(entry);
-
-        kl_array_push(&objdata->rawnormal, &normal);
-      }
-    } else if (biseqcstr(def, "f")) {
-      if (list->qty < 4) {
-        fprintf(stderr, "Mesh-OBJ: Too few vertices for face! (line %d)\n", objdata->lineno);
-        ret = -1;
-      } else {
-        obj_face_t face;
-
-        int j = 0;
-        face.num_verts = 0;
-        for (int i=1; i < list->qty; i++) {
-          if (parsefacevert(list->entry[i], &face.vert[j]) < 0) continue;
-          face.num_verts = ++j;
-          if (j >= FACE_MAXVERTS) break;
-        }
-        kl_array_push(&objdata->rawtris, &face);
-      }
-    }
-  }
-
-  objdata->lineno++;
-
-  bstrListDestroy(list);
-  return ret;
-}
-
-static int parsefacevert(bstring bstr, obj_face_vert_t *dst) {
-  int ret = 0;
-
-  struct bstrList *list = bsplits(bstr, (const_bstring)&facedelim);
-  
-  if (list->qty < 3) {
-    ret = -1;
-  } else {
-    dst->posidx  = bstrtoint(list->entry[0]) - 1;
-    dst->texidx  = bstrtoint(list->entry[1]) - 1;
-    dst->normidx = bstrtoint(list->entry[2]) - 1;
-  }
-
-  bstrListDestroy(list);
-  return ret;
-}
-
-static int bstrtoint(bstring bstr) {
-  char *cstr = bstr2cstr(bstr, ' ');
-  int val = atoi(cstr);
-  bcstrfree(cstr);
-  return val;
-}
-
-static float bstrtofloat(bstring bstr) {
-  char *cstr = bstr2cstr(bstr, ' ');
-  float val = atof(cstr);
-  bcstrfree(cstr);
-  return val;
+  return -1;
 }
 
 /* vim: set ts=2 sw=2 et */

@@ -23,8 +23,8 @@ int kl_vid_init() {
   SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
   SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE,   24);
 
-  kl_vid_sdl_window = SDL_CreateWindow("Kludge Engine", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, mode.w, mode.h, SDL_WINDOW_FULLSCREEN|SDL_WINDOW_OPENGL|SDL_WINDOW_SHOWN);
-  //kl_vid_sdl_window = SDL_CreateWindow("Kludge Engine", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 960, 600, SDL_WINDOW_OPENGL|SDL_WINDOW_SHOWN);
+  //kl_vid_sdl_window = SDL_CreateWindow("Kludge Engine", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, mode.w, mode.h, SDL_WINDOW_FULLSCREEN|SDL_WINDOW_OPENGL|SDL_WINDOW_SHOWN);
+  kl_vid_sdl_window = SDL_CreateWindow("Kludge Engine", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 1280, 800, SDL_WINDOW_OPENGL|SDL_WINDOW_SHOWN);
   if (kl_vid_sdl_window == NULL) {
     fprintf(stderr, "vid-sdl -> SDL_CreateWindow error: \"%s\"\n", SDL_GetError());
     return -1;
