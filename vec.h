@@ -9,6 +9,10 @@ typedef struct kl_vec3f {
   float x, y, z;
 } kl_vec3f_t;
 
+typedef struct kl_vec2f {
+  float x, y;
+} kl_vec2f_t;
+
 typedef struct kl_vec4f {
   float x, y, z, w;
 } kl_vec4f_t;

@@ -15,6 +15,8 @@ void kl_camera_update_scene(kl_camera_t *cam, kl_scene_t *scene) {
   /* projection matrix */
   kl_mat4f_t proj;
   kl_mat4f_perspective(&proj, cam->aspect, cam->fov, cam->near, cam->far);
+  kl_mat4f_t iproj;
+  kl_mat4f_invperspective(&iproj, cam->aspect, cam->fov, cam->near, cam->far);
 
   /* view-projection matrix */
   kl_mat4f_t viewproj;
@@ -53,8 +55,9 @@ void kl_camera_update_scene(kl_camera_t *cam, kl_scene_t *scene) {
 
   /* copy to scene */
   *scene = (kl_scene_t) {
-    .viewmatrix = view,
-    .projmatrix = proj,
+    .viewmatrix  = view,
+    .projmatrix  = proj,
+    .iprojmatrix = iproj,
     .vpmatrix = viewproj,
     .viewrot = {
       .column[0] = { .x = rot.column[0].x, .y = rot.column[0].y, .z = rot.column[0].z },

@@ -31,7 +31,7 @@ static int init_blit();
 static int init_minimal();
 static int init_lighting(int width, int height);
 static int init_tonemap();
-static void blit_to_screen(unsigned int texture, float w, float h, float x, float y);
+static void blit_to_screen(unsigned int texture, float w, float h, float x, float y, float scale, float offset);
 static void bind_ubo(unsigned int program, char *name, unsigned int binding);
 
 static unsigned int rbo_depth;
@@ -120,6 +120,8 @@ static unsigned int blit_program;
 static int blit_uniform_image;
 static int blit_uniform_size;
 static int blit_uniform_offset;
+static int blit_uniform_colorscale;
+static int blit_uniform_coloroffset;
 
 /* full-screen quad (NDC coordinates) */
 static int vbo_quad_coords;
@@ -137,6 +139,7 @@ static int vao_sphere;
 typedef struct uniform_scene {
   kl_mat4f_t   viewmatrix;
   kl_mat4f_t   projmatrix;
+  kl_mat4f_t   iprojmatrix;
   kl_mat4f_t   vpmatrix;
   kl_vec4f_t   viewpos;
   kl_mat3x4f_t viewrot;
@@ -244,11 +247,12 @@ int kl_gl3_init() {
 void kl_gl3_update_scene(kl_scene_t *scene) {
   kl_mat3f_t *viewrot = &scene->viewrot;
   uniform_scene_t data = {
-    .viewmatrix = scene->viewmatrix,
-    .projmatrix = scene->projmatrix,
-    .vpmatrix   = scene->vpmatrix,
-    .viewpos    = { .x = scene->viewpos.x, .y = scene->viewpos.y, .z = scene->viewpos.z, .w = 1.0f },
-    .viewrot    = {
+    .viewmatrix  = scene->viewmatrix,
+    .projmatrix  = scene->projmatrix,
+    .iprojmatrix = scene->iprojmatrix,
+    .vpmatrix    = scene->vpmatrix,
+    .viewpos     = { .x = scene->viewpos.x, .y = scene->viewpos.y, .z = scene->viewpos.z, .w = 1.0f },
+    .viewrot     = {
       .column[0] = { .x = viewrot->column[0].x, .y = viewrot->column[0].y, .z = viewrot->column[0].z, .w = 0.0f },
       .column[1] = { .x = viewrot->column[1].x, .y = viewrot->column[1].y, .z = viewrot->column[1].z, .w = 0.0f },
       .column[2] = { .x = viewrot->column[2].x, .y = viewrot->column[2].y, .z = viewrot->column[2].z, .w = 0.0f }
@@ -562,35 +566,35 @@ void kl_gl3_composite() {
 void kl_gl3_debugtex(int mode) {
   switch (mode) {
     case 0:
-      blit_to_screen(gbuffer_tex_depth[0],  0.18, 0.18, -0.78, -0.785);
-      blit_to_screen(gbuffer_tex_normal[0], 0.18, 0.18, -0.39, -0.785);
-      blit_to_screen(gbuffer_tex_diffuse,   0.18, 0.18,  0.0,  -0.785);
-      blit_to_screen(gbuffer_tex_specular,  0.18, 0.18,  0.39, -0.785);
-      blit_to_screen(gbuffer_tex_emissive,  0.18, 0.18,  0.78, -0.785);
+      blit_to_screen(gbuffer_tex_depth[0],  0.18, 0.18, -0.78, -0.785, 0.001, 0.0);
+      blit_to_screen(gbuffer_tex_normal[0], 0.18, 0.18, -0.39, -0.785, 1.0, 0.0);
+      blit_to_screen(gbuffer_tex_diffuse,   0.18, 0.18,  0.0,  -0.785, 1.0, 0.0);
+      blit_to_screen(gbuffer_tex_specular,  0.18, 0.18,  0.39, -0.785, 1.0, 0.0);
+      blit_to_screen(gbuffer_tex_emissive,  0.18, 0.18,  0.78, -0.785, 1.0, 0.0);
       break;
     case 1:
-      blit_to_screen(gbuffer_tex_depth[0], 0.15, 0.15, -0.833, -0.8);
-      blit_to_screen(gbuffer_tex_depth[1], 0.15, 0.15, -0.500, -0.8);
-      blit_to_screen(gbuffer_tex_depth[2], 0.15, 0.15, -0.166, -0.8);
-      blit_to_screen(gbuffer_tex_depth[3], 0.15, 0.15,  0.166, -0.8);
-      blit_to_screen(gbuffer_tex_depth[4], 0.15, 0.15,  0.500, -0.8);
-      blit_to_screen(gbuffer_tex_depth[5], 0.15, 0.15,  0.833, -0.8);
+      blit_to_screen(gbuffer_tex_depth[0], 1.0, 1.0, 0.0, 0.0, 0.001, 0.0);
+      blit_to_screen(gbuffer_tex_depth[1], 0.18, 0.18, -0.78, -0.785, 0.001, 0.0);
+      blit_to_screen(gbuffer_tex_depth[2], 0.18, 0.18, -0.39, -0.785, 0.001, 0.0);
+      blit_to_screen(gbuffer_tex_depth[3], 0.18, 0.18,  0.0,  -0.785, 0.001, 0.0);
+      blit_to_screen(gbuffer_tex_depth[4], 0.18, 0.18,  0.39, -0.785, 0.001, 0.0);
+      blit_to_screen(gbuffer_tex_depth[5], 0.18, 0.18,  0.78, -0.785, 0.001, 0.0);
       break;
     case 2:
-      blit_to_screen(gbuffer_tex_normal[0], 0.15, 0.15, -0.833, -0.8);
-      blit_to_screen(gbuffer_tex_normal[1], 0.15, 0.15, -0.500, -0.8);
-      blit_to_screen(gbuffer_tex_normal[2], 0.15, 0.15, -0.166, -0.8);
-      blit_to_screen(gbuffer_tex_normal[3], 0.15, 0.15,  0.166, -0.8);
-      blit_to_screen(gbuffer_tex_normal[4], 0.15, 0.15,  0.500, -0.8);
-      blit_to_screen(gbuffer_tex_normal[5], 0.15, 0.15,  0.833, -0.8);
+      blit_to_screen(gbuffer_tex_normal[0], 1.0, 1.0, 0.0, 0.0, 1.0, 0.0);
+      blit_to_screen(gbuffer_tex_normal[1], 0.18, 0.18, -0.78, -0.785, 1.0, 0.0);
+      blit_to_screen(gbuffer_tex_normal[2], 0.18, 0.18, -0.39, -0.785, 1.0, 0.0);
+      blit_to_screen(gbuffer_tex_normal[3], 0.18, 0.18,  0.0,  -0.785, 1.0, 0.0);
+      blit_to_screen(gbuffer_tex_normal[4], 0.18, 0.18,  0.39, -0.785, 1.0, 0.0);
+      blit_to_screen(gbuffer_tex_normal[5], 0.18, 0.18,  0.78, -0.785, 1.0, 0.0);
       break;
     case 3:
-      blit_to_screen(ssao_tex_occlusion[0], 0.15, 0.15, -0.833, -0.8);
-      blit_to_screen(ssao_tex_occlusion[1], 0.15, 0.15, -0.500, -0.8);
-      blit_to_screen(ssao_tex_occlusion[2], 0.15, 0.15, -0.166, -0.8);
-      blit_to_screen(ssao_tex_occlusion[3], 0.15, 0.15,  0.166, -0.8);
-      blit_to_screen(ssao_tex_occlusion[4], 0.15, 0.15,  0.500, -0.8);
-      blit_to_screen(ssao_tex_occlusion[5], 0.15, 0.15,  0.833, -0.8);
+      blit_to_screen(ssao_tex_occlusion[0], 1.0, 1.0, 0.0, 0.0, -1.0, 1.0);
+      blit_to_screen(ssao_tex_occlusion[1], 0.18, 0.18, -0.78, -0.785, 1.0, 0.0);
+      blit_to_screen(ssao_tex_occlusion[2], 0.18, 0.18, -0.39, -0.785, 1.0, 0.0);
+      blit_to_screen(ssao_tex_occlusion[3], 0.18, 0.18,  0.0,  -0.785, 1.0, 0.0);
+      blit_to_screen(ssao_tex_occlusion[4], 0.18, 0.18,  0.39, -0.785, 1.0, 0.0);
+      blit_to_screen(ssao_tex_occlusion[5], 0.18, 0.18,  0.78, -0.785, 1.0, 0.0);
       break;
   }
 }
@@ -1006,6 +1010,8 @@ static int init_blit() {
   blit_uniform_image  = glGetUniformLocation(blit_program, "image");
   blit_uniform_size   = glGetUniformLocation(blit_program, "size");
   blit_uniform_offset = glGetUniformLocation(blit_program, "offset");
+  blit_uniform_colorscale  = glGetUniformLocation(blit_program, "colorscale");
+  blit_uniform_coloroffset = glGetUniformLocation(blit_program, "coloroffset");
 
   return 0;
 }
@@ -1095,7 +1101,7 @@ static int init_tonemap() {
   return 0;
 }
 
-static void blit_to_screen(unsigned int texture, float w, float h, float x, float y) {
+static void blit_to_screen(unsigned int texture, float w, float h, float x, float y, float scale, float offset) {
   glUseProgram(blit_program);
 
   glUniform1i(blit_uniform_image, 0);
@@ -1104,6 +1110,8 @@ static void blit_to_screen(unsigned int texture, float w, float h, float x, floa
 
   glUniform2f(blit_uniform_size, w, h);
   glUniform2f(blit_uniform_offset, x, y);
+  glUniform1f(blit_uniform_colorscale, scale);
+  glUniform1f(blit_uniform_coloroffset, offset);
 
   glBindVertexArray(vao_quad);
 

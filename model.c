@@ -1,6 +1,7 @@
 #include "model.h"
 
 #include "model-iqm2.h"
+#include "model-obj.h"
 
 #include <unistd.h>
 #include <sys/stat.h>
@@ -31,9 +32,10 @@ kl_model_t *kl_model_load(char *path) {
 
   kl_model_t *model = NULL;
   if (kl_model_isiqm2(data, size)) {
-    model = kl_model_loadiqm2(data);
+    model = kl_model_loadiqm2(data, size);
+  } else if (kl_model_isobj(data, size)) {
+    model = kl_model_loadobj(data, size);
   }
-  /* other loaders go here, follow above format */
 
 
   if (model == NULL) {

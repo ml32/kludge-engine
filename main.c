@@ -24,14 +24,16 @@ int main(int argc, char **argv) {
     .aspect = (float)w/(float)h,
     .fov = 1.5708f, /* pi/2 rad or 90 deg */
     .near = 1.0f,
-    .far  = 1000.0f
+    .far  = 10000.0f
   };
-  kl_model_t *model = kl_model_load("test_assets/test.iqm");
-  kl_render_add_model(model);
+  kl_model_t *model1 = kl_model_load("test_assets/test.iqm");
+  //kl_render_add_model(model1);
+  kl_model_t *model2 = kl_model_load("test_assets/sponza.obj");
+  kl_render_add_model(model2);
 
-  kl_vec3f_t light1_pos = { .x = 10.0f, .y = -20.0f, .z = 40.0f };
+  kl_vec3f_t light1_pos = { .x = 100.0f, .y = 100.0f, .z = 0.0f };
   kl_render_add_light(&light1_pos, 1.0f, 0.8f, 0.5f, 1000.0f);
-  kl_vec3f_t light2_pos = { .x = -10.0f, .y = -30.0f, .z = -10.0f };
+  kl_vec3f_t light2_pos = { .x = -100.0f, .y = 100.0f, .z = 0.0f };
   kl_render_add_light(&light2_pos, 0.8f, 0.8f, 1.0f, 1500.0f);
   kl_vec3f_t envlight_dir = { 2.0f, 1.0f, -2.0f };
   kl_render_set_envlight(&envlight_dir, 0.8f, 0.8f, 1.0f, 0.6f, 1.0f, 0.9f, 0.6f, 0.2f);
@@ -87,9 +89,9 @@ int main(int argc, char **argv) {
     kl_camera_local_rotate(&cam, &mouseangle);
     
     kl_vec3f_t offset = {
-      .x = (move_r ? 0.2f : 0.0f) - (move_l ? 0.2f : 0.0f),
+      .x = (move_r ? 10.0f : 0.0f) - (move_l ? 10.0f : 0.0f),
       .y = 0.0f,
-      .z = (move_b ? 0.2f : 0.0f) - (move_f ? 0.2f : 0.0f)
+      .z = (move_b ? 10.0f : 0.0f) - (move_f ? 10.0f : 0.0f)
     };
     kl_camera_local_move(&cam, &offset);
 

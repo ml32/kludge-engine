@@ -4,6 +4,7 @@ static const char *vshader_gbuffer_src =
 "layout(std140) uniform scene {\n"
 "  uniform mat4 viewmatrix;\n"
 "  uniform mat4 projmatrix;\n"
+"  uniform mat4 iprojmatrix;\n"
 "  uniform mat4 vpmatrix;\n"
 "  uniform vec3 viewpos;\n"
 "  uniform mat3 viewrot;\n"
@@ -124,9 +125,9 @@ static const char *fshader_ssao_src =
 "    vec3  occluder_offset = vec3(sample_offsets[i], depth - occluder_depth);\n" /* offset in eye-space */
 "    vec3  dir  = normalize(occluder_offset);\n"
 "    float dist = length(occluder_offset);\n"
-"    occlusion += max(0.0, dot(dir, normal)) / sqrt(1.0 + dist * dist);\n"
+"    occlusion += dot(dir, normal) / sqrt(1.0 + dist * dist);\n"
 "  };\n"
-"  ssao = occlusion / 8.0;\n"
+"  ssao = occlusion / (8.0 * 6.0);\n" /* samples (8) * levels of detail (6) */
 "}\n";
 
 static const char *vshader_upsample_src =
@@ -159,14 +160,15 @@ static const char *fshader_upsample_src =
 "  float value = 0.0;\n"
 "  for (int i=0; i < 4; i++) {\n"
 "    float sample_depth = texture(tsdepth, coord[i]).r;\n"
+"    if (abs(sample_depth - depth) > 10.0) continue;\n"
 "    vec3 sample_normal;\n"
 "    sample_normal.xy = texture(tsnormal, coord[i]).rg;\n"
 "    sample_normal.z  = sqrt(1.0 - dot(sample_normal.xy, sample_normal.xy));\n"
-"    float scale = max(0.0, dot(normal, sample_normal)) / pow(abs(sample_depth - depth) + 1.0, 4.0);\n"
+"    float scale = max(0.0, dot(normal, sample_normal));\n"
 "    value += scale * texture(tocclusion, coord[i]).r;\n"
 "    total += scale;\n"
 "  }\n"
-"  ssao = value / total;\n"
+"  ssao = total < 0.1 ? 0.0 : value / total;\n"
 "}\n";
 
 static const char *vshader_minimal_src = 
@@ -190,6 +192,7 @@ static const char *vshader_pointlight_src =
 "layout(std140) uniform scene {\n"
 "  uniform mat4 viewmatrix;\n"
 "  uniform mat4 projmatrix;\n"
+"  uniform mat4 iprojmatrix;\n"
 "  uniform mat4 vpmatrix;\n"
 "  uniform vec3 viewpos;\n"
 "  uniform mat3 viewrot;\n"
@@ -262,6 +265,7 @@ static const char *fshader_envlight_src =
 "layout(std140) uniform scene {\n"
 "  uniform mat4 viewmatrix;\n"
 "  uniform mat4 projmatrix;\n"
+"  uniform mat4 iprojmatrix;\n"
 "  uniform mat4 vpmatrix;\n"
 "  uniform vec3 viewpos;\n"
 "  uniform mat3 viewrot;\n"
@@ -290,7 +294,7 @@ static const char *fshader_envlight_src =
 "  norm.xy = texture(tnormal, gl_FragCoord.xy).xy;\n"
 "  norm.z  = sqrt(1.0 - dot(norm.xy, norm.xy));\n"
 ""
-"  float occlusion = pow(1.0 - texture(tocclusion, gl_FragCoord.xy).r / 6.0, 4.0);\n"
+"  float occlusion = pow(1.0 - max(0.0, texture(tocclusion, gl_FragCoord.xy).r), 4.0);\n"
 ""
 "  vec3 lightdir = normalize(viewrot * -light.direction.xyz);\n"
 "  vec3 eyedir   = -normalize(fray_eye);\n"
@@ -336,9 +340,11 @@ static const char *vshader_blit_src =
 
 static const char *fshader_blit_src = 
 "#version 330\n"
+"uniform float colorscale;\n"
+"uniform float coloroffset;\n"
 "uniform sampler2DRect image;\n"
 "smooth in vec2 ftexcoord;\n"
 "layout(location = 0) out vec4 color;\n"
 "void main() {\n"
-"  color = texture(image, ftexcoord * textureSize(image));\n"
+"  color = texture(image, ftexcoord * textureSize(image)) * colorscale + coloroffset;\n"
 "}\n";

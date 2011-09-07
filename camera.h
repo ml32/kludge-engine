@@ -7,6 +7,7 @@
 typedef struct kl_scene {
   kl_mat4f_t viewmatrix;
   kl_mat4f_t projmatrix;
+  kl_mat4f_t iprojmatrix;
   kl_mat4f_t vpmatrix;
   kl_mat3f_t viewrot;
   kl_vec3f_t viewpos;
