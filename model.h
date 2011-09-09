@@ -1,8 +1,8 @@
 #ifndef KL_MODEL_H
 #define KL_MODEL_H
 
-#include "texture.h"
 #include "sphere.h"
+#include "material.h"
 
 #define KL_BUFFER_POSITION 0x00
 #define KL_BUFFER_TEXCOORD 0x01
@@ -11,15 +11,8 @@
 #define KL_BUFFER_BLENDIDX 0x04
 #define KL_BUFFER_BLENDWT  0x05
 
-typedef struct kl_material {
-  kl_texture_t *diffuse;
-  kl_texture_t *normal;
-  kl_texture_t *specular;
-  kl_texture_t *emissive;
-} kl_material_t;
-
 typedef struct kl_mesh {
-  kl_material_t material;
+  kl_material_t *material;
   unsigned int tris_i, tris_n; /* starting index and count */
 } kl_mesh_t;
 

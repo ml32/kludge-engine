@@ -188,18 +188,9 @@ kl_model_t* kl_model_loadobj(uint8_t *data, int size) {
 
   model->attribs = kl_render_define_attribs(model->tris, cfg, 4);
   
-  kl_texture_t *diffuse  = kl_texture_incref("DEFAULT_DIFFUSE");
-  kl_texture_t *normal   = kl_texture_incref("DEFAULT_NORMAL");
-  kl_texture_t *specular = kl_texture_incref("DEFAULT_SPECULAR");
-  kl_texture_t *emissive = kl_texture_incref("DEFAULT_EMISSIVE");
   model->mesh_n = 1;
   model->mesh[0] = (kl_mesh_t){
-    .material = {
-      .diffuse  = diffuse,
-      .normal   = normal,
-      .specular = specular,
-      .emissive = emissive
-    },
+    .material = kl_material_incref("DEFAULT_MATERIAL"),
     .tris_i = 0,
     .tris_n = kl_array_size(&objdata.buftris)
   };

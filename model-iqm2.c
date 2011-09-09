@@ -275,22 +275,8 @@ kl_model_t* kl_model_loadiqm2(uint8_t *data, int size) {
     iqm_mesh_t *mesh = meshes + i;
     
     char *path = text + mesh->material_i;
-    char  buf[256];
-    kl_texture_t *diffuse  = kl_texture_incref(path);
-    snprintf(buf, 256, "%s_n", path);
-    kl_texture_t *normal   = kl_texture_incref(buf);
-    snprintf(buf, 256, "%s_s", path);
-    kl_texture_t *specular = kl_texture_incref(buf);
-    snprintf(buf, 256, "%s_e", path);
-    kl_texture_t *emissive = kl_texture_incref(buf);
-
     model->mesh[i] = (kl_mesh_t){
-      .material = {
-        .diffuse  = diffuse,
-        .normal   = normal,
-        .specular = specular,
-        .emissive = emissive
-      },
+      .material = kl_material_incref(path),
       .tris_i = mesh->tris_i,
       .tris_n = mesh->tris_n
     };
@@ -298,6 +284,5 @@ kl_model_t* kl_model_loadiqm2(uint8_t *data, int size) {
 
   return model;
 }   
-
 
 /* vim: set ts=2 sw=2 et */

@@ -382,13 +382,13 @@ void kl_gl3_draw_pass_gbuffer(kl_model_t *model) {
     kl_mesh_t *mesh = model->mesh + i;
 
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, mesh->material.diffuse->id);
+    glBindTexture(GL_TEXTURE_2D, mesh->material->diffuse->id);
     glActiveTexture(GL_TEXTURE1);
-    glBindTexture(GL_TEXTURE_2D, mesh->material.normal->id);
+    glBindTexture(GL_TEXTURE_2D, mesh->material->normal->id);
     glActiveTexture(GL_TEXTURE2);
-    glBindTexture(GL_TEXTURE_2D, mesh->material.specular->id);
+    glBindTexture(GL_TEXTURE_2D, mesh->material->specular->id);
     glActiveTexture(GL_TEXTURE3);
-    glBindTexture(GL_TEXTURE_2D, mesh->material.emissive->id);
+    glBindTexture(GL_TEXTURE_2D, mesh->material->emissive->id);
 
     glDrawElements(GL_TRIANGLES, 3*mesh->tris_n, GL_UNSIGNED_INT, (void*)(3*mesh->tris_i*sizeof(int)));
   }
