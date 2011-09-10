@@ -3,6 +3,7 @@
 #include "model-obj.h"
 
 #include "model.h"
+#include "material-mtl.h"
 #include "renderer.h"
 #include "array.h"
 
@@ -43,14 +44,23 @@ typedef struct obj_face {
   obj_face_vert_t vert[FACE_MAXVERTS];
 } obj_face_t;
 
+#define OBJ_PATHLEN 0x100
+typedef struct obj_mesh {
+  char material[OBJ_PATHLEN];
+  unsigned int tris_i, tris_n;
+} obj_mesh_t;
+
 typedef struct obj_data {
   /* raw entries, as written in the obj file */
-  kl_array_t rawposition, rawnormal, rawtexcoord, rawtris;
+  kl_array_t rawposition, rawnormal, rawtexcoord;
   /* maps from separate position/normal/texcoord indices to combined vertex data: */
   kl_array_t indexmap;
   /* vertex data to be loaded into renderer */
-  kl_array_t bufposition, bufnormal, buftangent, buftexcoord, buftris;
+  kl_array_t bufposition, bufnormal, buftangent, buftexcoord;
+  kl_array_t tris, meshes;
 } obj_data_t;
+
+static obj_mesh_t obj_curmesh;
 
 static void objdata_init(obj_data_t *data);
 static void objdata_free(obj_data_t *data);
@@ -75,6 +85,10 @@ kl_model_t* kl_model_loadobj(uint8_t *data, int size) {
   obj_data_t objdata;
   objdata_init(&objdata);
 
+  obj_curmesh.material[0] = '\0';
+  obj_curmesh.tris_i = 0;
+  obj_curmesh.tris_n = 0;
+
   /* load data from file */
   char *buf  = malloc(size+1);
   memcpy(buf, data, size);
@@ -88,45 +102,21 @@ kl_model_t* kl_model_loadobj(uint8_t *data, int size) {
   } while (cur != NULL);
   free(buf);
 
-  printf("verts: %d\nnorms: %d\ntexcoords: %d\nfaces: %d\n",
+  int tris_i = kl_array_size(&objdata.tris);
+  if (tris_i > obj_curmesh.tris_i) {
+    obj_curmesh.tris_n = tris_i - obj_curmesh.tris_i;
+    kl_array_push(&objdata.meshes, &obj_curmesh);
+  }
+
+  printf("verts: %d\nnorms: %d\ntexcoords: %d\nmeshes: %d\n",
     kl_array_size(&objdata.rawposition),
     kl_array_size(&objdata.rawnormal),
     kl_array_size(&objdata.rawtexcoord),
-    kl_array_size(&objdata.rawtris));
-
-  /* initialize vert index mappings */
-  indexmap_t blankmap = { .n = 0 };
-  for (int i=0; i < kl_array_size(&objdata.rawposition); i++) {
-    kl_array_set_expand(&objdata.indexmap, i, &blankmap);
-  }
-
-  /* build list of unique vertices from tris */
-  for (int i=0; i < kl_array_size(&objdata.rawtris); i++) {
-    obj_face_t objface;
-    kl_array_get(&objdata.rawtris, i, &objface);
-   
-    for (int j=0; j < objface.num_verts - 2; j++) { 
-      triangle_t tri;
-      int vert;
-
-      vert = objdata_getvertidx(&objdata, &objface.vert[0]);
-      if (vert < 0) goto cleanup;
-      tri.vert[0] = vert;
-
-      vert = objdata_getvertidx(&objdata, &objface.vert[j+1]);
-      if (vert < 0) goto cleanup;
-      tri.vert[1] = vert;
-
-      vert = objdata_getvertidx(&objdata, &objface.vert[j+2]);
-      if (vert < 0) goto cleanup;
-      tri.vert[2] = vert;
-
-      kl_array_push(&objdata.buftris, &tri);
-    }
-  }
+    kl_array_size(&objdata.meshes));
 
   /* load model data */
-  model = malloc(sizeof(kl_model_t) + sizeof(kl_mesh_t));
+  int num_meshes = kl_array_size(&objdata.meshes);
+  model = malloc(sizeof(kl_model_t) + num_meshes * sizeof(kl_mesh_t));
 
   kl_sphere_bounds(&model->bounds, (kl_vec3f_t*)kl_array_data(&objdata.bufposition), kl_array_size(&objdata.bufposition));
   model->winding = KL_RENDER_CCW;
@@ -157,8 +147,8 @@ kl_model_t* kl_model_loadobj(uint8_t *data, int size) {
   vbo   = kl_render_upload_vertdata(kl_array_data(&objdata.buftexcoord), bytes);
   model->bufs[KL_BUFFER_TEXCOORD] = vbo;
 
-  bytes = kl_array_size(&objdata.buftris) * sizeof(triangle_t);
-  model->tris = kl_render_upload_tris((unsigned int*)kl_array_data(&objdata.buftris), bytes);
+  bytes = kl_array_size(&objdata.tris) * sizeof(triangle_t);
+  model->tris = kl_render_upload_tris((unsigned int*)kl_array_data(&objdata.tris), bytes);
 
   kl_render_attrib_t cfg[4];
   cfg[0] = (kl_render_attrib_t){
@@ -188,12 +178,15 @@ kl_model_t* kl_model_loadobj(uint8_t *data, int size) {
 
   model->attribs = kl_render_define_attribs(model->tris, cfg, 4);
   
-  model->mesh_n = 1;
-  model->mesh[0] = (kl_mesh_t){
-    .material = kl_material_incref("DEFAULT_MATERIAL"),
-    .tris_i = 0,
-    .tris_n = kl_array_size(&objdata.buftris)
-  };
+  model->mesh_n = num_meshes;
+  for (int i=0; i < num_meshes; i++) {
+    obj_mesh_t mesh;
+    kl_array_get(&objdata.meshes, i, &mesh);
+    model->mesh[i].material = kl_material_incref(mesh.material);
+    kl_array_get(&objdata.meshes, i, &mesh);
+    model->mesh[i].tris_i   = mesh.tris_i;
+    model->mesh[i].tris_n   = mesh.tris_n;
+  }
 
   cleanup:
   objdata_free(&objdata);
@@ -205,40 +198,43 @@ static void objdata_init(obj_data_t *data) {
   kl_array_init(&data->rawposition, sizeof(kl_vec3f_t));
   kl_array_init(&data->rawnormal,   sizeof(kl_vec3f_t));
   kl_array_init(&data->rawtexcoord, sizeof(kl_vec2f_t));
-  kl_array_init(&data->rawtris,     sizeof(obj_face_t));
   kl_array_init(&data->indexmap,    sizeof(indexmap_t));
   kl_array_init(&data->bufposition, sizeof(kl_vec3f_t));
   kl_array_init(&data->bufnormal,   sizeof(kl_vec3f_t));
   kl_array_init(&data->buftangent,  sizeof(kl_vec4f_t));
   kl_array_init(&data->buftexcoord, sizeof(kl_vec2f_t));
-  kl_array_init(&data->buftris,     sizeof(triangle_t));
+  kl_array_init(&data->tris,        sizeof(triangle_t));
+  kl_array_init(&data->meshes,      sizeof(obj_mesh_t));
 }
 
 static void objdata_free(obj_data_t *data) {
   kl_array_free(&data->rawposition);
   kl_array_free(&data->rawnormal);
   kl_array_free(&data->rawtexcoord);
-  kl_array_free(&data->rawtris);
+  kl_array_free(&data->meshes);
   kl_array_free(&data->indexmap);
   kl_array_free(&data->bufposition);
   kl_array_free(&data->bufnormal);
   kl_array_free(&data->buftangent);
   kl_array_free(&data->buftexcoord);
-  kl_array_free(&data->buftris);
+  kl_array_free(&data->tris);
 }
 
 static int objdata_getvertidx(obj_data_t *objdata, obj_face_vert_t *vert) {
   indexmap_t map;
-  kl_array_get(&objdata->indexmap, vert->posidx, &map);
-  for (int i=0; i < map.n; i++) {
-    if (map.texidx[i] == vert->texidx && map.normidx[i] == vert->normidx) {
-      return map.vertidx[i];
+  if (vert->posidx < kl_array_size(&objdata->indexmap)) {
+    kl_array_get(&objdata->indexmap, vert->posidx, &map);
+    for (int i=0; i < map.n; i++) {
+      if (map.texidx[i] == vert->texidx && map.normidx[i] == vert->normidx) {
+        return map.vertidx[i];
+      }
     }
-  }
-
-  if (map.n >= INDEXMAP_MAXENTRIES) {
-    fprintf(stderr, "Mesh-OBJ: Overloaded vertex!  Increase INDEX_MAXENTRIES or simplify mesh!\n");
-    return -1;
+    if (map.n >= INDEXMAP_MAXENTRIES) {
+      fprintf(stderr, "Mesh-OBJ: Overloaded vertex!  Increase INDEX_MAXENTRIES or simplify mesh!\n");
+      return -1;
+    }
+  } else {
+    map.n = 0;
   }
 
   kl_vec3f_t position;
@@ -264,15 +260,15 @@ static int objdata_getvertidx(obj_data_t *objdata, obj_face_vert_t *vert) {
   }
   
   int vertidx = kl_array_push(&objdata->bufposition, &position);
-  kl_array_set_expand(&objdata->bufnormal,   vertidx, &normal);
-  kl_array_set_expand(&objdata->buftangent,  vertidx, &tangent);
-  kl_array_set_expand(&objdata->buftexcoord, vertidx, &texcoord);
+  kl_array_set_expand(&objdata->bufnormal,   vertidx, &normal,   0);
+  kl_array_set_expand(&objdata->buftangent,  vertidx, &tangent,  0);
+  kl_array_set_expand(&objdata->buftexcoord, vertidx, &texcoord, 0);
 
   int i = map.n++;
   map.texidx[i]  = vert->texidx;
   map.normidx[i] = vert->normidx;
   map.vertidx[i] = vertidx;
-  kl_array_set(&objdata->indexmap, vert->posidx, &map);
+  kl_array_set_expand(&objdata->indexmap, vert->posidx, &map, 0);
 
   return vertidx;
 }
@@ -291,6 +287,24 @@ static int parseline(obj_data_t *objdata, char *line) {
       break;
     case 'f':
       return parseface(objdata, line);
+  }
+
+  char *cur = line;
+  char *def;
+  def = strsep(&cur, " \t");
+  if (strcmp(def, "mtllib") == 0) {
+    char *path = strsep(&cur, " \t");
+    kl_material_setmtl(path);
+  } else if (strcmp(def, "usemtl") == 0) {
+    int tris_i = kl_array_size(&objdata->tris);
+    if (tris_i > obj_curmesh.tris_i) {
+      obj_curmesh.tris_n = tris_i - obj_curmesh.tris_i;
+      kl_array_push(&objdata->meshes, &obj_curmesh);
+    }
+    char *path = strsep(&cur, " \t");
+    strncpy(obj_curmesh.material, path, OBJ_PATHLEN);
+    obj_curmesh.tris_i = tris_i;
+    obj_curmesh.tris_n = 0;
   }
   return 0;
 }
@@ -341,7 +355,24 @@ static int parseface(obj_data_t *objdata, char *line) {
     return -1;
   }
   
-  kl_array_push(&objdata->rawtris, &face);
+  for (int i=0; i < face.num_verts - 2; i++) { 
+    triangle_t tri;
+    int vert;
+
+    vert = objdata_getvertidx(objdata, &face.vert[0]);
+    if (vert < 0) return -1;
+    tri.vert[0] = vert;
+
+    vert = objdata_getvertidx(objdata, &face.vert[i+1]);
+    if (vert < 0) return -1;
+    tri.vert[1] = vert;
+
+    vert = objdata_getvertidx(objdata, &face.vert[i+2]);
+    if (vert < 0) return -1;
+    tri.vert[2] = vert;
+
+    kl_array_push(&objdata->tris, &tri);
+  }
   return 0;
 }
 

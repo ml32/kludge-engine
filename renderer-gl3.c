@@ -18,7 +18,8 @@
 #include "renderer-gl3-meshdata.c"
 #include "renderer-gl3-shaders.c"
 
-static const float anisotropy = 4.0f;
+static float anisotropy = 4.0f;
+static int mipbias = 2;
 
 static int convertenum(int value);
 static int typesize(int value);
@@ -648,7 +649,9 @@ unsigned int kl_gl3_upload_texture(void *data, int w, int h, int format, int typ
   uint8_t *buf = malloc(bytes);
   memcpy(buf, data, bytes);
   for (int i=0; ; i++){
-    glTexImage2D(GL_TEXTURE_2D, i, glformat, w, h, 0, glformat, gltype, buf);
+    if (i >= mipbias) {
+      glTexImage2D(GL_TEXTURE_2D, i - mipbias, glformat, w, h, 0, glformat, gltype, buf);
+    }
     w >>= 1;
     h >>= 1;
     if (w <= 0 || h <= 0) break;

@@ -1,5 +1,6 @@
 #include "material.h"
 
+#include "material-mtl.h"
 #include "resource.h"
 #include "texture.h"
 
@@ -37,7 +38,7 @@ static kl_material_t *material_load(char *path) {
     material_load_default(path, material);
     return material;
   }
-//  if (kl_material_loadmtl(path, material)) return material;
+  if (kl_material_loadfrommtl(path, material)) return material;
   material_load_raw(path, material);
   return material;
 }

@@ -36,7 +36,7 @@ static inline void  kl_array_set(kl_array_t *array, int i, void *item) {
   int bytes = array->item_size;
   memcpy(array->data + i * bytes, item, bytes);
 }
-void kl_array_set_expand(kl_array_t *array, int i, void *item);
+void kl_array_set_expand(kl_array_t *array, int i, void *item, uint8_t clearbyte);
 
 static inline void* kl_array_data(kl_array_t *array) {
   return array->data;

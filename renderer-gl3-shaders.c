@@ -41,11 +41,14 @@ static const char *fshader_gbuffer_src =
 "layout(location = 3) out vec4  gspecular;\n"
 "layout(location = 4) out vec4  gemissive;\n"
 "void main() {\n"
+"  vec4 diffuse = texture(tdiffuse, ftexcoord);\n"
+"  if (diffuse.a < 0.5) discard;\n"
+"\n"
 "  vec3 n_local = texture(tnormal, ftexcoord).xyz * 2.0 - 1.0;\n"
 "  vec3 n_world = normalize(tbnmatrix * n_local);\n" /* this is actually eye-space, not world-space */
 "\n"
 "  gdepth    = fdepth;\n"
-"  gdiffuse  = texture(tdiffuse, ftexcoord);\n"
+"  gdiffuse  = diffuse;\n"
 "  gnormal   = n_world.xy;\n"
 "  gspecular = texture(tspecular, ftexcoord);\n"
 "  gemissive = texture(temissive, ftexcoord);\n"
@@ -327,7 +330,8 @@ static const char *fshader_tonemap_src =
 "layout(location = 0) out vec4 color;\n"
 "void main() {\n"
 "  vec3 c = texture(tcomposite, gl_FragCoord.xy).rgb;\n"
-"  color = vec4(1.0 / (1.0 + exp(-8.0 * pow(c, vec3(0.8)) + 4.0)) - 0.018, 1.0);\n"
+//"  color = vec4(1.0 / (1.0 + exp(-8.0 * pow(c, vec3(0.8)) + 4.0)) - 0.018, 1.0);\n"
+"  color = vec4(1.0 / (1.0 + exp(-8.0 * c + 4.0)) - 0.018, 1.0);\n"
 "}\n";
 
 static const char *vshader_blit_src =

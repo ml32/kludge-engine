@@ -27,7 +27,7 @@ int main(int argc, char **argv) {
     .far  = 10000.0f
   };
   kl_model_t *model1 = kl_model_load("test_assets/test.iqm");
-  //kl_render_add_model(model1);
+  kl_render_add_model(model1);
   kl_model_t *model2 = kl_model_load("test_assets/sponza.obj");
   kl_render_add_model(model2);
 
@@ -35,8 +35,8 @@ int main(int argc, char **argv) {
   kl_render_add_light(&light1_pos, 1.0f, 0.8f, 0.5f, 20000.0f);
   kl_vec3f_t light2_pos = { .x = -500.0f, .y = 500.0f, .z = 0.0f };
   kl_render_add_light(&light2_pos, 0.8f, 0.8f, 1.0f, 20000.0f);
-  kl_vec3f_t envlight_dir = { 2.0f, 1.0f, -2.0f };
-  kl_render_set_envlight(&envlight_dir, 0.8f, 0.8f, 1.0f, 0.4f, 1.0f, 0.9f, 0.6f, 0.2f);
+  kl_vec3f_t envlight_dir = { 2.0f, -2.0f, 1.0f };
+  kl_render_set_envlight(&envlight_dir, 0.8f, 0.8f, 1.0f, 0.4f, 1.0f, 0.9f, 0.6f, 0.6f);
   
   int move_f = 0;
   int move_b = 0;

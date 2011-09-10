@@ -12,7 +12,7 @@ static const int array_grow_div = 2;
 /* grow one increment w/ exponential scaling */
 static void array_grow(kl_array_t *array);
 /* grow to at least 'size' w/ exponential scaling */
-static void array_growto(kl_array_t *array, int minsize);
+static void array_growto(kl_array_t *array, int minsize, uint8_t clearbyte);
 /* grow to exactly 'size' entries */
 static void array_resize(kl_array_t *array, int size);
 
@@ -49,12 +49,12 @@ int kl_array_push(kl_array_t *array, void *item) {
   return i;
 }
 
-void kl_array_set_expand(kl_array_t *array, int i, void *item) {
+void kl_array_set_expand(kl_array_t *array, int i, void *item, uint8_t clearbyte) {
   if (i < array->num_items) {
     kl_array_set(array, i, item);
     return;
   }
-  array_growto(array, i+1);
+  array_growto(array, i+1, clearbyte);
   array->num_items = i + 1;
   kl_array_set(array, i, item);
 }
@@ -64,12 +64,14 @@ static void array_grow(kl_array_t *array) {
   array_resize(array, size);
 }
 
-static void array_growto(kl_array_t *array, int minsize) {
-  int size = array->size;
+static void array_growto(kl_array_t *array, int minsize, uint8_t clearbyte) {
+  int oldsize = array->num_items;
+  int size    = array->size;
   while (size < minsize) {
     size = size * array_grow_mul / array_grow_div;
   }
   array_resize(array, size);
+  memset(array->data + oldsize, clearbyte, minsize - oldsize);
 }
 
 static void array_resize(kl_array_t *array, int size) {
