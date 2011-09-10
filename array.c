@@ -71,7 +71,7 @@ static void array_growto(kl_array_t *array, int minsize, uint8_t clearbyte) {
     size = size * array_grow_mul / array_grow_div;
   }
   array_resize(array, size);
-  memset(array->data + oldsize, clearbyte, minsize - oldsize);
+  memset(array->data + oldsize * array->item_size, clearbyte, (minsize - oldsize) * array->item_size);
 }
 
 static void array_resize(kl_array_t *array, int size) {
