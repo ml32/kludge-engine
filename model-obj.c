@@ -6,6 +6,7 @@
 #include "material-mtl.h"
 #include "renderer.h"
 #include "array.h"
+#include "vec.h"
 
 #include <stdint.h>
 #include <string.h>
@@ -71,6 +72,7 @@ static int parsenormal(obj_data_t *objdata, char *line);
 static int parsetexcoord(obj_data_t *objdata, char *line);
 static int parseface(obj_data_t *objdata, char *line);
 static int parsefacevert(char *str, obj_face_vert_t *dst);
+static void gentangent(obj_data_t *objdata, unsigned int idx1, unsigned int idx2, unsigned int idx3);
 
 /* ------------------------ */
 int kl_model_isobj(uint8_t *data, int size) {
@@ -106,6 +108,15 @@ kl_model_t* kl_model_loadobj(uint8_t *data, int size) {
   if (tris_i > obj_curmesh.tris_i) {
     obj_curmesh.tris_n = tris_i - obj_curmesh.tris_i;
     kl_array_push(&objdata.meshes, &obj_curmesh);
+  }
+
+  /* generate tangent data */
+  for (int i=0; i < kl_array_size(&objdata.tris); i++) {
+    triangle_t tri;
+    kl_array_get(&objdata.tris, i, &tri);
+    gentangent(&objdata, tri.vert[0], tri.vert[1], tri.vert[2]);
+    gentangent(&objdata, tri.vert[1], tri.vert[2], tri.vert[0]);
+    gentangent(&objdata, tri.vert[2], tri.vert[0], tri.vert[1]);
   }
 
   printf("verts: %d\nnorms: %d\ntexcoords: %d\nmeshes: %d\n",
@@ -325,6 +336,7 @@ static int parsenormal(obj_data_t *objdata, char *line) {
     fprintf(stderr, "Mesh-OBJ: Failed to read vertex normal!\n");
     return -1;
   }
+  kl_vec3f_norm(&normal, &normal);
   kl_array_push(&objdata->rawnormal, &normal);
   return 0;
 }
@@ -403,6 +415,55 @@ static int parsefacevert(char *str, obj_face_vert_t *dst) {
   }
 
   return -1;
+}
+static void gentangent(obj_data_t *objdata, unsigned int idx1, unsigned int idx2, unsigned int idx3) {
+  kl_vec3f_t p0, p1, p2;
+  kl_array_get(&objdata->bufposition, idx1, &p0);
+  kl_array_get(&objdata->bufposition, idx2, &p1);
+  kl_array_get(&objdata->bufposition, idx3, &p2);
+  kl_vec3f_t normal;
+  kl_array_get(&objdata->bufposition, idx1, &normal);
+  kl_vec2f_t t0, t1, t2;
+  kl_array_get(&objdata->buftexcoord, idx1, &t0);
+  kl_array_get(&objdata->buftexcoord, idx2, &t1);
+  kl_array_get(&objdata->buftexcoord, idx3, &t2);
+
+  kl_vec3f_t dp1, dp2;
+  kl_vec3f_sub(&dp1, &p1, &p0);
+  kl_vec3f_sub(&dp2, &p2, &p0);
+
+  float du1 = t1.x - t0.x;
+  float du2 = t2.x - t0.x;
+  float dv1 = t1.y - t0.y;
+  float dv2 = t2.y - t0.y;
+
+  float scale = 1.0f / (du1 * dv2 - du2 * dv1);
+
+  kl_vec3f_t dv2dp1, dv1dp2, du1dp2, du2dp1;
+  kl_vec3f_scale(&dv2dp1, &dp1, dv2);
+  kl_vec3f_scale(&dv1dp2, &dp2, dv1);
+  kl_vec3f_scale(&du1dp2, &dp2, du1);
+  kl_vec3f_scale(&du2dp1, &dp1, du2);
+
+  kl_vec3f_t tangent_prime, bitangent_prime;
+  kl_vec3f_sub(&tangent_prime, &dv1dp2, &dv2dp1);
+  kl_vec3f_scale(&tangent_prime, &tangent_prime, scale);
+  kl_vec3f_sub(&bitangent_prime, &du2dp1, &du1dp2);
+  kl_vec3f_scale(&bitangent_prime, &bitangent_prime, scale);
+
+  kl_vec3f_t tangent, bitangent;
+  kl_vec3f_cross(&tangent, &bitangent_prime, &normal);
+  kl_vec3f_norm(&tangent, &tangent);
+  kl_vec3f_cross(&bitangent, &normal, &tangent_prime);
+  kl_vec3f_norm(&bitangent, &bitangent);
+
+  kl_vec4f_t final;
+  final.x = tangent.x;
+  final.y = tangent.y;
+  final.z = tangent.z;
+  final.w = 1.0f;
+
+  kl_array_set(&objdata->buftangent, idx1, &final);
 }
 
 /* vim: set ts=2 sw=2 et */

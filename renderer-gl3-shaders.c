@@ -300,7 +300,7 @@ static const char *fshader_envlight_src =
 "  norm.xy = texture(tnormal, gl_FragCoord.xy).xy;\n"
 "  norm.z  = sqrt(1.0 - dot(norm.xy, norm.xy));\n"
 ""
-"  float occlusion = pow(1.0 - max(0.0, texture(tocclusion, gl_FragCoord.xy).r), 2.0);\n"
+"  float occlusion = pow(1.0 - max(0.0, texture(tocclusion, gl_FragCoord.xy).r), 4.0);\n"
 ""
 "  vec3 lightdir = normalize(viewrot * -light.direction.xyz);\n"
 "  vec3 eyedir   = -normalize(fray_eye);\n"

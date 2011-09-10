@@ -85,7 +85,7 @@ static void texture_load_default_specular(char *path, kl_texture_t *texture) {
   uint32_t *buf = malloc(0x400);
   for (int i=0; i < 0x10; i++) {
     for (int j=0; j < 0x10; j++) {
-      buf[i*0x10 + j] = 0x80FFFFFF;
+      buf[i*0x10 + j] = 0x10808080;
     }
   }
   strncpy(texture->path, path, KL_TEXTURE_PATHLEN);
