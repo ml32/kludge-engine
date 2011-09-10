@@ -15,6 +15,20 @@ void kl_sphere_merge(kl_sphere_t *dst, kl_sphere_t *s1, kl_sphere_t *s2) {
   kl_vec3f_scale(&temp, &dir, s2->radius);
   kl_vec3f_add(&max2, &s2->center, &temp);
 
+  /* check whether one sphere is contained within the other */
+  if (kl_sphere_test(s1, &max2)) {
+    if (dst != s1) {
+      *dst = *s1;
+    }
+    return;
+  }
+  if (kl_sphere_test(s2, &max1)) {
+    if (dst != s2) {
+      *dst = *s2;
+    }
+    return;
+  }
+
   kl_vec3f_add(&center, &max1, &max2);
   kl_vec3f_scale(&center, &center, 0.5f);
 
