@@ -347,6 +347,9 @@ static int parsetexcoord(obj_data_t *objdata, char *line) {
     fprintf(stderr, "Mesh-OBJ: Failed to read texture coordinate!\n");
     return -1;
   }
+  /* these are backwards for some reason... */
+  //texcoord.x = -texcoord.x;
+  texcoord.y = -texcoord.y;
   kl_array_push(&objdata->rawtexcoord, &texcoord);
   return 0;
 }
@@ -446,9 +449,9 @@ static void gentangent(obj_data_t *objdata, unsigned int idx1, unsigned int idx2
   kl_vec3f_scale(&du2dp1, &dp1, du2);
 
   kl_vec3f_t tangent_prime, bitangent_prime;
-  kl_vec3f_sub(&tangent_prime, &dv1dp2, &dv2dp1);
+  kl_vec3f_sub(&tangent_prime, &dv2dp1, &dv1dp2);
   kl_vec3f_scale(&tangent_prime, &tangent_prime, scale);
-  kl_vec3f_sub(&bitangent_prime, &du2dp1, &du1dp2);
+  kl_vec3f_sub(&bitangent_prime, &du1dp2, &du2dp1);
   kl_vec3f_scale(&bitangent_prime, &bitangent_prime, scale);
 
   kl_vec3f_t tangent, bitangent;
