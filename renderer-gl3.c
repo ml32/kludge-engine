@@ -867,7 +867,7 @@ static int init_gbuffer(int width, int height) {
     glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_SWIZZLE_B, GL_RED);
 
     glBindTexture(GL_TEXTURE_RECTANGLE, gbuffer_tex_normal[i]);
-    glTexImage2D(GL_TEXTURE_RECTANGLE, 0, GL_RG16F, w, h, 0, GL_RG, GL_UNSIGNED_SHORT, NULL);
+    glTexImage2D(GL_TEXTURE_RECTANGLE, 0, GL_RG16, w, h, 0, GL_RG, GL_UNSIGNED_SHORT, NULL);
     glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
