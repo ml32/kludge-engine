@@ -19,7 +19,7 @@
 #include "renderer-gl3-shaders.c"
 
 static float anisotropy = 4.0f;
-static int mipbias = 1;
+static int mipbias = 2;
 
 static int convertenum(int value);
 static int typesize(int value);
