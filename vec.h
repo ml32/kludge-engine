@@ -63,6 +63,14 @@ static inline float kl_vec3f_dist(kl_vec3f_t *s1, kl_vec3f_t *s2) {
   return kl_vec3f_magnitude(&diff);
 }
 
+static inline void kl_vec3f_midpoint(kl_vec3f_t *dst, kl_vec3f_t *s1, kl_vec3f_t *s2) {
+  *dst = (kl_vec3f_t){
+    .x = (s1->x + s2->x) / 2.0f,
+    .y = (s1->y + s2->y) / 2.0f,
+    .z = (s1->z + s2->z) / 2.0f
+  };
+}
+
 static inline void kl_vec3f_norm(kl_vec3f_t *dst, kl_vec3f_t *src) {
   float m = kl_vec3f_magnitude(src);
 

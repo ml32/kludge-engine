@@ -2,6 +2,7 @@
 #include "input.h"
 #include "renderer.h"
 
+#include "terrain.h"
 #include "model.h"
 #include "camera.h"
 
@@ -26,6 +27,9 @@ int main(int argc, char **argv) {
     .near = 1.0f,
     .far  = 10000.0f
   };
+
+  kl_terrain_testsphere();
+
   kl_model_t *model1 = kl_model_load("test_assets/test.iqm");
   kl_render_add_model(model1);
   kl_model_t *model2 = kl_model_load("test_assets/sponza.obj");
