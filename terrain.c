@@ -55,6 +55,16 @@ static svo_node_t* testsphere(kl_sphere_t *sphere, int depth, int x, int y, int 
   int size   = 1 << depth;
   int center = depth > 0 ? 1 << (depth - 1) : 0;
   svo_node_t *node = malloc(sizeof(svo_node_t));
+
+  kl_vec3f_t position, normal;
+  position.x = (float)(x + center);
+  position.y = (float)(y + center);
+  position.z = (float)(z + center);
+  kl_vec3f_sub(&normal, &position, &sphere->center);
+  kl_vec3f_norm(&normal, &normal);
+  node->info.position = position;
+  node->info.normal   = normal;
+
   kl_vec3f_t corners[8] = {
     { .x = x,      .y = y,      .z = z },
     { .x = x+size, .y = y,      .z = z },
@@ -69,25 +79,34 @@ static svo_node_t* testsphere(kl_sphere_t *sphere, int depth, int x, int y, int 
   for (int i=0; i < 8; i++) {
     test |= kl_sphere_test(sphere, &corners[i]) << i;
   }
-  node->info.position.x = (float)x;
-  node->info.position.y = (float)y;
-  node->info.position.z = (float)z;
-  kl_vec3f_sub(&node->info.normal, &node->info.position, &sphere->center);
-  kl_vec3f_norm(&node->info.normal, &node->info.normal);
+
   if (test == 0xFF) {
     node->info.flags = FLAG_FULL;
     for (int i=0; i < 8; i++) {
       node->children[i] = NULL;
     }
-  } else if (test == 0x00) {
-    node->info.flags = FLAG_EMPTY;
-    for (int i=0; i < 8; i++) {
-      node->children[i] = NULL;
-    }
   } else {
-    node->info.flags = 0;
-    for (int i=0; i < 8; i++) {
-      node->children[i] = testsphere(sphere, depth-1, i & 0x01 ? x + center : x, i & 0x02 ? y + center : y, i & 0x04 ? z + center : z);
+    kl_vec3f_t offset, nearest;
+    kl_vec3f_sub(&offset, &position, &sphere->center);
+    if (kl_vec3f_magnitude(&offset) > sphere->radius) {
+      kl_vec3f_norm(&offset, &offset);
+      kl_vec3f_scale(&offset, &offset, sphere->radius);
+    }
+    kl_vec3f_add(&nearest, &sphere->center, &offset);
+
+    if (nearest.x < x || nearest.x > x + size ||
+        nearest.y < y || nearest.y > y + size ||
+        nearest.z < z || nearest.z > z + size)
+    {
+      node->info.flags = FLAG_EMPTY;
+      for (int i=0; i < 8; i++) {
+        node->children[i] = NULL;
+      }
+    } else {
+      node->info.flags = 0;
+      for (int i=0; i < 8; i++) {
+        node->children[i] = testsphere(sphere, depth-1, i & 0x01 ? x + center : x, i & 0x02 ? y + center : y, i & 0x04 ? z + center : z);
+      }
     }
   }
   return node;
