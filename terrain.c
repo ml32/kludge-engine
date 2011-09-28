@@ -3,6 +3,7 @@
 #include "sphere.h"
 #include "array.h"
 #include "vec.h"
+#include "renderer.h"
 
 #include <stdio.h>
 
@@ -291,7 +292,7 @@ static void meshify(svo_node_t *root, mesh_t *mesh, int depth, int x, int y, int
   meshify(root, mesh, depth-1, x+center, y+center, z+center);
 }
 
-void kl_terrain_testsphere() {
+kl_terrain_t* kl_terrain_testsphere() {
   kl_sphere_t sphere = {
     .center = { .x = 0.0f, .y = 0.0f, .z = 0.0f },
     .radius = 50.0f
@@ -303,5 +304,29 @@ void kl_terrain_testsphere() {
   meshify(root, &mesh, depth, 0, 0, 0);
   svo_free(root);
   mesh_free(&mesh);
+
+  kl_terrain_t* terrain = malloc(sizeof(kl_terrain_t));
+  terrain->buf_verts = kl_render_upload_vertdata(kl_array_data(&mesh.verts), kl_array_bytes(&mesh.verts));
+  terrain->buf_norms = kl_render_upload_vertdata(kl_array_data(&mesh.norms), kl_array_bytes(&mesh.norms));
+  terrain->buf_tris  = kl_render_upload_tris(kl_array_data(&mesh.tris), kl_array_bytes(&mesh.tris));
+  terrain->tris_n = kl_array_size(&mesh.tris);
+
+  kl_render_attrib_t cfg[2];
+  cfg[0] = (kl_render_attrib_t){
+    .index  = 0,
+    .size   = 3,
+    .type   = KL_RENDER_FLOAT,
+    .buffer = terrain->buf_verts
+  };
+  cfg[1] = (kl_render_attrib_t){
+    .index  = 1,
+    .size   = 3,
+    .type   = KL_RENDER_FLOAT,
+    .buffer = terrain->buf_norms
+  };
+
+  terrain->attribs = kl_render_define_attribs(terrain->buf_tris, cfg, 2);
+
+  return terrain;
 }
 /* vim: set ts=2 sw=2 et */

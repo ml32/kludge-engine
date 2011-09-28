@@ -42,6 +42,10 @@ static inline void* kl_array_data(kl_array_t *array) {
   return array->data;
 }
 
+static inline int kl_array_bytes(kl_array_t *array) {
+  return array->num_items * array->item_size;
+}
+
 static inline int kl_array_size(kl_array_t *array) {
   return array->num_items;
 }
