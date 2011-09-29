@@ -4,22 +4,48 @@
 #include "sphere.h"
 #include "material.h"
 
-#define KL_BUFFER_POSITION 0x00
-#define KL_BUFFER_TEXCOORD 0x01
-#define KL_BUFFER_NORMAL   0x02
-#define KL_BUFFER_TANGENT  0x03
-#define KL_BUFFER_BLENDIDX 0x04
-#define KL_BUFFER_BLENDWT  0x05
+#define KL_MODEL_PROP    0x01
+#define KL_MODEL_ACTOR   0x02
+#define KL_MODEL_TERRAIN 0x03
 
 typedef struct kl_mesh {
   kl_material_t *material;
   unsigned int tris_i, tris_n; /* starting index and count */
 } kl_mesh_t;
 
+typedef struct kl_model_bufs_prop {
+  unsigned int position;
+  unsigned int texcoord;
+  unsigned int normal;
+  unsigned int tangent;
+} kl_model_bufs_prop_t;
+
+typedef struct kl_model_bufs_actor {
+  unsigned int position;
+  unsigned int texcoord;
+  unsigned int normal;
+  unsigned int tangent;
+  unsigned int blendidx;
+  unsigned int blendwt;
+} kl_model_bufs_actor_t;
+
+typedef struct kl_model_bufs_terrain {
+  unsigned int position;
+  unsigned int normal;
+  unsigned int texweight;
+} kl_model_bufs_terrain_t;
+
+typedef union kl_model_bufs {
+  kl_model_bufs_prop_t    prop;
+  kl_model_bufs_actor_t   actor;
+  kl_model_bufs_terrain_t terrain;
+}  kl_model_bufs_t;
+
 typedef struct kl_model {
-  kl_sphere_t  bounds;
-  int          winding;
-  unsigned int bufs[6]; /* several vertex buffer objects */
+  int type;
+  kl_sphere_t bounds;
+  int winding;
+  kl_model_bufs_t bufs; /* several vertex buffer objects */
   unsigned int tris;    /* element array buffer */
   unsigned int attribs; /* a vertex array object (or equivalent) */
   unsigned int mesh_n;

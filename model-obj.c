@@ -129,34 +129,34 @@ kl_model_t* kl_model_loadobj(uint8_t *data, int size) {
   int num_meshes = kl_array_size(&objdata.meshes);
   model = malloc(sizeof(kl_model_t) + num_meshes * sizeof(kl_mesh_t));
 
+  model->type = KL_MODEL_PROP;
   kl_sphere_bounds(&model->bounds, (kl_vec3f_t*)kl_array_data(&objdata.bufposition), kl_array_size(&objdata.bufposition));
   model->winding = KL_RENDER_CCW;
 
-  model->bufs[KL_BUFFER_POSITION] = 0;
-  model->bufs[KL_BUFFER_TEXCOORD] = 0;
-  model->bufs[KL_BUFFER_NORMAL]   = 0;
-  model->bufs[KL_BUFFER_TANGENT]  = 0;
-  model->bufs[KL_BUFFER_BLENDIDX] = 0;
-  model->bufs[KL_BUFFER_BLENDWT]  = 0;
+  kl_model_bufs_prop_t *bufs = &model->bufs.prop;
+  bufs->position = 0;
+  bufs->texcoord = 0;
+  bufs->normal   = 0;
+  bufs->tangent  = 0;
 
   int bytes;
   unsigned int vbo;
 
   bytes = kl_array_size(&objdata.bufposition) * sizeof(kl_vec3f_t);
   vbo   = kl_render_upload_vertdata(kl_array_data(&objdata.bufposition), bytes);
-  model->bufs[KL_BUFFER_POSITION] = vbo;
+  bufs->position = vbo;
 
   bytes = kl_array_size(&objdata.bufnormal) * sizeof(kl_vec3f_t);
   vbo   = kl_render_upload_vertdata(kl_array_data(&objdata.bufnormal), bytes);
-  model->bufs[KL_BUFFER_NORMAL] = vbo;
+  bufs->normal = vbo;
 
   bytes = kl_array_size(&objdata.buftangent) * sizeof(kl_vec4f_t);
   vbo   = kl_render_upload_vertdata(kl_array_data(&objdata.buftangent), bytes);
-  model->bufs[KL_BUFFER_TANGENT] = vbo;
+  bufs->tangent = vbo;
 
   bytes = kl_array_size(&objdata.buftexcoord) * sizeof(kl_vec2f_t);
   vbo   = kl_render_upload_vertdata(kl_array_data(&objdata.buftexcoord), bytes);
-  model->bufs[KL_BUFFER_TEXCOORD] = vbo;
+  bufs->texcoord = vbo;
 
   bytes = kl_array_size(&objdata.tris) * sizeof(triangle_t);
   model->tris = kl_render_upload_tris((unsigned int*)kl_array_data(&objdata.tris), bytes);
@@ -166,25 +166,25 @@ kl_model_t* kl_model_loadobj(uint8_t *data, int size) {
     .index  = 0,
     .size   = 3,
     .type   = KL_RENDER_FLOAT,
-    .buffer = model->bufs[KL_BUFFER_POSITION]
+    .buffer = bufs->position
   };
   cfg[1] = (kl_render_attrib_t){
     .index  = 1,
     .size   = 2,
     .type   = KL_RENDER_FLOAT,
-    .buffer = model->bufs[KL_BUFFER_TEXCOORD]
+    .buffer = bufs->texcoord
   };
   cfg[2] = (kl_render_attrib_t){
     .index  = 2,
     .size   = 3,
     .type   = KL_RENDER_FLOAT,
-    .buffer = model->bufs[KL_BUFFER_NORMAL]
+    .buffer = bufs->normal
   };
   cfg[3] = (kl_render_attrib_t){
     .index  = 3,
     .size   = 4,
     .type   = KL_RENDER_FLOAT,
-    .buffer = model->bufs[KL_BUFFER_TANGENT]
+    .buffer = bufs->tangent
   };
 
   model->attribs = kl_render_define_attribs(model->tris, cfg, 4);

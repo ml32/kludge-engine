@@ -180,51 +180,53 @@ kl_model_t* kl_model_loadiqm2(uint8_t *data, int size) {
 
   kl_model_t *model = malloc(sizeof(kl_model_t) + header->mesh_n * sizeof(kl_mesh_t));
 
+  model->type = KL_MODEL_ACTOR;
   kl_sphere_bounds(&model->bounds, (kl_vec3f_t*)(data + va_position->offset), header->vert_n);
   model->winding = KL_RENDER_CW;
 
-  model->bufs[KL_BUFFER_POSITION] = 0;
-  model->bufs[KL_BUFFER_TEXCOORD] = 0;
-  model->bufs[KL_BUFFER_NORMAL]   = 0;
-  model->bufs[KL_BUFFER_TANGENT]  = 0;
-  model->bufs[KL_BUFFER_BLENDIDX] = 0;
-  model->bufs[KL_BUFFER_BLENDWT]  = 0;
+  kl_model_bufs_actor_t *bufs = &model->bufs.actor;
+  bufs->position = 0;
+  bufs->texcoord = 0;
+  bufs->normal   = 0;
+  bufs->tangent  = 0;
+  bufs->blendidx = 0;
+  bufs->blendwt  = 0;
 
   if (va_position != NULL) {
     void *attr = data + va_position->offset;
     int   size = 3 * header->vert_n * sizeof(float);
     int   vbo  = kl_render_upload_vertdata(attr, size);
-    model->bufs[KL_BUFFER_POSITION] = vbo;
+    bufs->position = vbo;
   }
   if (va_texcoord != NULL) {
     void *attr = data + va_texcoord->offset;
     int   size = 2 * header->vert_n * sizeof(float);
     int   vbo  = kl_render_upload_vertdata(attr, size);
-    model->bufs[KL_BUFFER_TEXCOORD] = vbo;
+    bufs->texcoord = vbo;
   }
   if (va_normal != NULL) {
     void *attr = data + va_normal->offset;
     int   size = 3 * header->vert_n * sizeof(float);
     int   vbo  = kl_render_upload_vertdata(attr, size);
-    model->bufs[KL_BUFFER_NORMAL] = vbo;
+    bufs->normal = vbo;
   }
   if (va_tangent != NULL) {
     void *attr = data + va_tangent->offset;
     int   size = 4 * header->vert_n * sizeof(float);
     int   vbo  = kl_render_upload_vertdata(attr, size);
-    model->bufs[KL_BUFFER_TANGENT] = vbo;
+    bufs->tangent = vbo;
   }
   if (va_blendidx != NULL) {
     void *attr = data + va_blendidx->offset;
     int   size = 4 * header->vert_n * sizeof(uint8_t);
     int   vbo  = kl_render_upload_vertdata(attr, size);
-    model->bufs[KL_BUFFER_BLENDIDX] = vbo;
+    bufs->blendidx = vbo;
   }
   if (va_blendwt  != NULL) {
     void *attr = data + va_blendwt->offset;
     int   size = 4 * header->vert_n * sizeof(uint8_t);
     int   vbo  = kl_render_upload_vertdata(attr, size);
-    model->bufs[KL_BUFFER_BLENDWT] = vbo;
+    bufs->blendwt = vbo;
   }
   
   /* portability issue: assumes uint32_t and unsigned int are equivalent */
@@ -235,37 +237,37 @@ kl_model_t* kl_model_loadiqm2(uint8_t *data, int size) {
     .index  = 0,
     .size   = 3,
     .type   = KL_RENDER_FLOAT,
-    .buffer = model->bufs[KL_BUFFER_POSITION]
+    .buffer = bufs->position
   };
   cfg[1] = (kl_render_attrib_t){
     .index  = 1,
     .size   = 2,
     .type   = KL_RENDER_FLOAT,
-    .buffer = model->bufs[KL_BUFFER_TEXCOORD]
+    .buffer = bufs->texcoord
   };
   cfg[2] = (kl_render_attrib_t){
     .index  = 2,
     .size   = 3,
     .type   = KL_RENDER_FLOAT,
-    .buffer = model->bufs[KL_BUFFER_NORMAL]
+    .buffer = bufs->normal
   };
   cfg[3] = (kl_render_attrib_t){
     .index  = 3,
     .size   = 4,
     .type   = KL_RENDER_FLOAT,
-    .buffer = model->bufs[KL_BUFFER_TANGENT]
+    .buffer = bufs->tangent
   };
   cfg[4] = (kl_render_attrib_t){
     .index  = 4,
     .size   = 4,
     .type   = KL_RENDER_UINT8,
-    .buffer = model->bufs[KL_BUFFER_BLENDIDX]
+    .buffer = bufs->blendidx
   };
   cfg[5] = (kl_render_attrib_t){
     .index  = 5,
     .size   = 4,
     .type   = KL_RENDER_UINT8,
-    .buffer = model->bufs[KL_BUFFER_BLENDWT]
+    .buffer = bufs->blendwt
   };
 
   model->attribs = kl_render_define_attribs(model->tris, cfg, 6);
