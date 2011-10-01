@@ -3,6 +3,7 @@
 
 #include "array.h"
 #include "vec.h"
+#include "material.h"
 
 #include <stdint.h>
 
@@ -30,9 +31,14 @@ typedef struct kl_frame_anchor {
   kl_frame_coord_t offset;
 } kl_frame_anchor_t;
 
-typedef struct kl_frame {
-  uint32_t id;
+#define KL_FRAME_TYPE_NONE    0x00
+#define KL_FRAME_TYPE_GRAPHIC 0x01
+#define KL_FRAME_TYPE_TEXT    0x02
+
+typedef struct kl_frame_header {
+  int type;
   int hidden;
+  uint32_t id;
 
   kl_frame_coord_t  preferred_size;   /* size used when only one anchor is defined */
   kl_frame_anchor_t anchor_primary;   /* primary anchor used to determine position */
@@ -43,6 +49,23 @@ typedef struct kl_frame {
   kl_vec2f_t effective_size;
 
   kl_array_t children;
+} kl_frame_header_t;
+
+typedef struct kl_frame_graphic {
+  kl_frame_header_t header;
+  kl_material_t *material;
+} kl_frame_graphic_t;
+
+typedef struct kl_frame_text {
+  kl_frame_header_t header;
+  int   n;
+  char *str;
+} kl_frame_text_t;
+
+typedef union kl_frame {
+  kl_frame_header_t  header;
+  kl_frame_graphic_t graphic;
+  kl_frame_text_t    text;
 } kl_frame_t;
 
 kl_frame_t* kl_frame_new(char *id, kl_frame_coord_t *preferred_size, kl_frame_anchor_t *anchor_primary, kl_frame_anchor_t *anchor_secondary);

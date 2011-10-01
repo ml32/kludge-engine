@@ -30,47 +30,65 @@ kl_frame_t* kl_frame_new(char *id, kl_frame_coord_t *preferred_size, kl_frame_an
     .offset = coord_none
   };
 
-  frame->id     = hash(id);
-  frame->hidden = 0;
+  kl_frame_header_t *header = &frame->header;
+
+  header->type   = KL_FRAME_TYPE_NONE;
+  header->id     = hash(id);
+  header->hidden = 0;
   if (preferred_size != NULL) {
-    frame->preferred_size = *preferred_size;
+    header->preferred_size = *preferred_size;
   } else {
-    frame->preferred_size = coord_none;
+    header->preferred_size = coord_none;
   }
   if (anchor_primary != NULL) {
-    frame->anchor_primary   = *anchor_primary;
+    header->anchor_primary   = *anchor_primary;
     if (anchor_secondary != NULL) {
-      frame->anchor_secondary = *anchor_secondary;
+      header->anchor_secondary = *anchor_secondary;
     } else {
-      frame->anchor_secondary = anchor_none;
+      header->anchor_secondary = anchor_none;
     }
   } else {
-    frame->anchor_primary   = anchor_none;
-    frame->anchor_secondary = anchor_none;
+    header->anchor_primary   = anchor_none;
+    header->anchor_secondary = anchor_none;
   }
-  frame->effective_position.x = 0.0f;
-  frame->effective_position.y = 0.0f;
-  frame->effective_size.x = 1.0f;
-  frame->effective_size.y = 1.0f;
+  header->effective_position.x = 0.0f;
+  header->effective_position.y = 0.0f;
+  header->effective_size.x = 1.0f;
+  header->effective_size.y = 1.0f;
 
-  kl_array_init(&frame->children, sizeof(kl_frame_t*));
+  kl_array_init(&header->children, sizeof(kl_frame_t*));
 
   return frame;
 }
 
 void kl_frame_delete(kl_frame_t *frame) {
+  kl_frame_header_t *header = &frame->header;
+
   kl_frame_t *child;
-  for (int i=0; i < kl_array_size(&frame->children); i++) {
-    kl_array_get(&frame->children, i, &child);
+  for (int i=0; i < kl_array_size(&header->children); i++) {
+    kl_array_get(&header->children, i, &child);
     kl_frame_delete(child);
   }
-  kl_array_free(&frame->children);
+  kl_array_free(&header->children);
   
+  switch (header->type) {
+    case KL_FRAME_TYPE_GRAPHIC:
+      if (frame->graphic.material != NULL) {
+        kl_material_decref(frame->graphic.material);
+      }
+      break;
+    case KL_FRAME_TYPE_TEXT:
+      if (frame->text.str != NULL) {
+        free(frame->text.str);
+      }
+      break;
+  }
+
   free(frame);
 }
 
 void kl_frame_add(kl_frame_t *frame, kl_frame_t *child) {
-  kl_array_push(&frame->children, &child);
+  kl_array_push(&frame->header.children, &child);
 }
 
 /* point in normalized local frame coordinates */
@@ -118,9 +136,9 @@ static kl_frame_t* frame_lookup(kl_frame_t *parent, uint32_t id) {
   if (id == 0) return parent;
 
   kl_frame_t *child;
-  for (int i=0; i < kl_array_size(&parent->children); i++) {
-    kl_array_get(&parent->children, i, &child);
-    if (child->id == id) {
+  for (int i=0; i < kl_array_size(&parent->header.children); i++) {
+    kl_array_get(&parent->header.children, i, &child);
+    if (child->header.id == id) {
       return child;
     }
   }
@@ -128,22 +146,23 @@ static kl_frame_t* frame_lookup(kl_frame_t *parent, uint32_t id) {
 }
 
 void kl_frame_update(kl_frame_t *frame, kl_frame_t *parent, int screen_w, int screen_h) {
-  if (frame->anchor_primary.point == KL_FRAME_ANCHOR_UNDEFINED) return;
-  if (frame->hidden) return;
+  kl_frame_header_t *header = &frame->header;
+  if (header->anchor_primary.point == KL_FRAME_ANCHOR_UNDEFINED) return;
+  if (header->hidden) return;
 
-  kl_frame_anchor_t *anchor_primary   = &frame->anchor_primary;
-  kl_frame_anchor_t *anchor_secondary = &frame->anchor_secondary;
+  kl_frame_anchor_t *anchor_primary   = &header->anchor_primary;
+  kl_frame_anchor_t *anchor_secondary = &header->anchor_secondary;
 
   kl_vec2f_t preferred_size;
-  coord_normalize(&frame->preferred_size, &preferred_size, screen_w, screen_h);
+  coord_normalize(&header->preferred_size, &preferred_size, screen_w, screen_h);
 
   /* get normalized coords for primary target and local anchor points */
   kl_frame_t *primary_target = frame_lookup(parent, anchor_primary->target_id);
 
   kl_vec2f_t primary_target_point;
   anchor_point(anchor_primary->target_point, &primary_target_point);
-  kl_vec2f_mul(&primary_target_point, &primary_target_point, &primary_target->effective_size);
-  kl_vec2f_add(&primary_target_point, &primary_target_point, &primary_target->effective_position);
+  kl_vec2f_mul(&primary_target_point, &primary_target_point, &primary_target->header.effective_size);
+  kl_vec2f_add(&primary_target_point, &primary_target_point, &primary_target->header.effective_position);
   kl_vec2f_t primary_offset;
   coord_normalize(&anchor_primary->offset, &primary_offset, screen_w, screen_h);
   kl_vec2f_add(&primary_target_point, &primary_target_point, &primary_offset);
@@ -162,8 +181,8 @@ void kl_frame_update(kl_frame_t *frame, kl_frame_t *parent, int screen_w, int sc
 
     kl_vec2f_t secondary_target_point;
     anchor_point(anchor_secondary->target_point, &secondary_target_point);
-    kl_vec2f_mul(&secondary_target_point, &secondary_target_point, &secondary_target->effective_size);
-    kl_vec2f_add(&secondary_target_point, &secondary_target_point, &secondary_target->effective_position);
+    kl_vec2f_mul(&secondary_target_point, &secondary_target_point, &secondary_target->header.effective_size);
+    kl_vec2f_add(&secondary_target_point, &secondary_target_point, &secondary_target->header.effective_position);
     kl_vec2f_t secondary_offset;
     coord_normalize(&anchor_secondary->offset, &secondary_offset, screen_w, screen_h);
     kl_vec2f_add(&secondary_target_point, &secondary_target_point, &secondary_offset);
@@ -201,8 +220,8 @@ void kl_frame_update(kl_frame_t *frame, kl_frame_t *parent, int screen_w, int sc
 
   /* update children */
   kl_frame_t *child;
-  for (int i=0; i < kl_array_size(&frame->children); i++) {
-    kl_array_get(&frame->children, i, &child);
+  for (int i=0; i < kl_array_size(&header->children); i++) {
+    kl_array_get(&header->children, i, &child);
     kl_frame_update(child, frame, screen_w, screen_h);
   }
 }
