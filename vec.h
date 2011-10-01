@@ -91,5 +91,26 @@ static inline void kl_vec3f_negate(kl_vec3f_t *dst, kl_vec3f_t *src) {
   };
 }
 
+static inline void kl_vec2f_mul(kl_vec2f_t *dst, kl_vec2f_t *s1, kl_vec2f_t *s2) {
+  *dst = (kl_vec2f_t){
+    .x = s1->x * s2->x,
+    .y = s1->y * s2->y
+  };
+}
+
+static inline void kl_vec2f_add(kl_vec2f_t *dst, kl_vec2f_t *s1, kl_vec2f_t *s2) {
+  *dst = (kl_vec2f_t){
+    .x = s1->x + s2->x,
+    .y = s1->y + s2->y
+  };
+}
+
+static inline void kl_vec2f_sub(kl_vec2f_t *dst, kl_vec2f_t *s1, kl_vec2f_t *s2) {
+  *dst = (kl_vec2f_t){
+    .x = s1->x - s2->x,
+    .y = s1->y - s2->y
+  };
+}
+
 #endif /* KL_VEC_H */
 /* vim: set ts=2 sw=2 et */
