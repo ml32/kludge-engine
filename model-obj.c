@@ -62,6 +62,7 @@ typedef struct obj_data {
 } obj_data_t;
 
 static obj_mesh_t obj_curmesh;
+static char obj_curmtl[OBJ_PATHLEN] = "\0";
 
 static void objdata_init(obj_data_t *data);
 static void objdata_free(obj_data_t *data);
@@ -193,8 +194,12 @@ kl_model_t* kl_model_loadobj(uint8_t *data, int size) {
   for (int i=0; i < num_meshes; i++) {
     obj_mesh_t mesh;
     kl_array_get(&objdata.meshes, i, &mesh);
-    model->mesh[i].material = kl_material_incref(mesh.material);
-    kl_array_get(&objdata.meshes, i, &mesh);
+    kl_material_t *material = kl_material_incref(mesh.material);
+    if (material == NULL) {
+      material = kl_material_incref("DEFAULT_MATERIAL");
+    }
+    assert(material != NULL);
+    model->mesh[i].material = material;
     model->mesh[i].tris_i   = mesh.tris_i;
     model->mesh[i].tris_n   = mesh.tris_n;
   }
@@ -305,7 +310,8 @@ static int parseline(obj_data_t *objdata, char *line) {
   def = strsep(&cur, " \t");
   if (strcmp(def, "mtllib") == 0) {
     char *path = strsep(&cur, " \t");
-    kl_material_setmtl(path);
+    /* prepend forward slash (paths are taken to be relative to virtual root) */
+    snprintf(obj_curmtl, OBJ_PATHLEN, "/%s", path);
   } else if (strcmp(def, "usemtl") == 0) {
     int tris_i = kl_array_size(&objdata->tris);
     if (tris_i > obj_curmesh.tris_i) {
@@ -313,7 +319,7 @@ static int parseline(obj_data_t *objdata, char *line) {
       kl_array_push(&objdata->meshes, &obj_curmesh);
     }
     char *path = strsep(&cur, " \t");
-    strncpy(obj_curmesh.material, path, OBJ_PATHLEN);
+    snprintf(obj_curmesh.material, OBJ_PATHLEN, "%s|%s", obj_curmtl, path);
     obj_curmesh.tris_i = tris_i;
     obj_curmesh.tris_n = 0;
   }

@@ -4,6 +4,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <assert.h>
 
 #define IQM_VERSION 2
 
@@ -272,13 +273,20 @@ kl_model_t* kl_model_loadiqm2(uint8_t *data, int size) {
 
   model->attribs = kl_render_define_attribs(model->tris, cfg, 6);
   
+  static char buf[0x100];
   model->mesh_n = header->mesh_n;
   for (int i=0; i < header->mesh_n; i++) {
     iqm_mesh_t *mesh = meshes + i;
     
     char *path = text + mesh->material_i;
+    snprintf(buf, 0x100, "/%s", path);
+    kl_material_t *material = kl_material_incref(buf);
+    if (material == NULL) {
+      material = kl_material_incref("DEFAULT_MATERIAL");
+    }
+    assert(material != NULL);
     model->mesh[i] = (kl_mesh_t){
-      .material = kl_material_incref(path),
+      .material = material,
       .tris_i = mesh->tris_i,
       .tris_n = mesh->tris_n
     };

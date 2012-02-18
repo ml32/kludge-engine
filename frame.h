@@ -69,6 +69,8 @@ typedef union kl_frame {
 } kl_frame_t;
 
 kl_frame_t* kl_frame_new(char *id, kl_frame_coord_t *preferred_size, kl_frame_anchor_t *anchor_primary, kl_frame_anchor_t *anchor_secondary);
+void kl_frame_graphic(kl_frame_t *frame, char *path);
+void kl_frame_text(kl_frame_t *frame, char *str);
 void kl_frame_delete(kl_frame_t *frame);
 void kl_frame_add(kl_frame_t *frame, kl_frame_t *child);
 void kl_frame_update(kl_frame_t *frame, kl_frame_t *parent, int screen_w, int screen_h);

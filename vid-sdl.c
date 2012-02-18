@@ -34,7 +34,7 @@ int kl_vid_init() {
 
   SDL_GL_SetSwapInterval(0); /* VSync disabled */
 
-  SDL_SetWindowGrab(kl_vid_sdl_window, SDL_TRUE);
+  //SDL_SetWindowGrab(kl_vid_sdl_window, SDL_TRUE);
 
   return 0;
 }

@@ -29,7 +29,7 @@ kl_model_t *kl_model_load(char *path) {
     return NULL;
   }
 
-
+  
   kl_model_t *model = NULL;
   if (kl_model_isiqm2(data, size)) {
     model = kl_model_loadiqm2(data, size);

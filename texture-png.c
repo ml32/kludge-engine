@@ -9,7 +9,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-void kl_texture_loadpng(char* path, kl_texture_t *texture) {
+bool kl_texture_loadpng(char* path, kl_texture_t *texture) {
   strncpy(texture->path, path, KL_TEXTURE_PATHLEN);
   texture->path[KL_TEXTURE_PATHLEN-1] = '\0';
   texture->w  = 0;
@@ -22,14 +22,14 @@ void kl_texture_loadpng(char* path, kl_texture_t *texture) {
   png_structp png = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
   if (png == NULL) {
     fprintf(stderr, "image-png: Failed to create png struct!\n");
-    return;
+    return false;
   }
 
   png_infop info = png_create_info_struct(png);
   if (info == NULL) {
     fprintf(stderr, "image-png: Failed to create info struct!\n");
     png_destroy_read_struct(&png, NULL, NULL);
-    return;
+    return false;
   }
  
   /* error handling & cleanup routine */ 
@@ -38,7 +38,7 @@ void kl_texture_loadpng(char* path, kl_texture_t *texture) {
     png_destroy_read_struct(&png, &info, NULL);
     if (file != NULL) fclose(file);
     if (buffer != NULL) free(buffer);
-    return;
+    return false;
   }
 
   file = fopen(path, "rb");
@@ -107,5 +107,7 @@ void kl_texture_loadpng(char* path, kl_texture_t *texture) {
   png_destroy_read_struct(&png, &info, NULL);
   fclose(file);
   free(buffer);
+
+  return true;
 }
 /* vim: set ts=2 sw=2 et */

@@ -549,6 +549,8 @@ void kl_gl3_draw_pass_debug(kl_mat4f_t *mvpmatrix, float r, float g, float b) {
 }
 
 void kl_gl3_composite() {
+  glEnable(GL_FRAMEBUFFER_SRGB);
+
   glUseProgram(tonemap_program);
 
   glUniform1i(tonemap_uniform_tcomposite, 0);
@@ -562,6 +564,8 @@ void kl_gl3_composite() {
   glBindVertexArray(0);
 
   glUseProgram(0);
+
+  glDisable(GL_FRAMEBUFFER_SRGB);
 }
 
 void kl_gl3_debugtex(int mode) {
@@ -634,10 +638,22 @@ unsigned int kl_gl3_upload_texture(void *data, int w, int h, int format, int typ
     fprintf(stderr, "Render: Bad pixel type! (%x)\n", type);
     return 0;
   }
-  int glformat = convertenum(format);
-  if (glformat == GL_FALSE) {
+  int glfmt = convertenum(format);
+  if (glfmt == GL_FALSE) {
     fprintf(stderr, "Render: Bad texture format! (%x)\n", format);
     return 0;
+  }
+  int glifmt;
+  switch (format) {
+    case KL_RENDER_RGB:
+      glifmt = GL_SRGB;
+      break;
+    case KL_RENDER_RGBA:
+      glifmt = GL_SRGB_ALPHA;
+      break;
+    default:
+      glifmt = glfmt;
+      break;
   }
 
   glGenTextures(1, &texture);
@@ -648,10 +664,7 @@ unsigned int kl_gl3_upload_texture(void *data, int w, int h, int format, int typ
   int bytes = w * h * c * typesize(type);
   uint8_t *buf = malloc(bytes);
   memcpy(buf, data, bytes);
-  for (int i=0; ; i++){
-    if (i >= mipbias) {
-      glTexImage2D(GL_TEXTURE_2D, i - mipbias, glformat, w, h, 0, glformat, gltype, buf);
-    }
+  for (int i=0; i < mipbias; i++) {
     w >>= 1;
     h >>= 1;
     if (w <= 0 || h <= 0) break;
@@ -675,7 +688,8 @@ unsigned int kl_gl3_upload_texture(void *data, int w, int h, int format, int typ
       }
     }
   }
-  free(buf);
+  glTexImage2D(GL_TEXTURE_2D, 0, glifmt, w, h, 0, glfmt, gltype, buf);
+  glGenerateMipmap(GL_TEXTURE_2D);
 
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR_MIPMAP_LINEAR);

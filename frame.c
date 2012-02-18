@@ -61,17 +61,8 @@ kl_frame_t* kl_frame_new(char *id, kl_frame_coord_t *preferred_size, kl_frame_an
   return frame;
 }
 
-void kl_frame_delete(kl_frame_t *frame) {
-  kl_frame_header_t *header = &frame->header;
-
-  kl_frame_t *child;
-  for (int i=0; i < kl_array_size(&header->children); i++) {
-    kl_array_get(&header->children, i, &child);
-    kl_frame_delete(child);
-  }
-  kl_array_free(&header->children);
-  
-  switch (header->type) {
+void frame_free_resources(kl_frame_t *frame) {
+  switch (frame->header.type) {
     case KL_FRAME_TYPE_GRAPHIC:
       if (frame->graphic.material != NULL) {
         kl_material_decref(frame->graphic.material);
@@ -83,6 +74,26 @@ void kl_frame_delete(kl_frame_t *frame) {
       }
       break;
   }
+}
+
+void kl_frame_graphic(kl_frame_t *frame, char *path) {
+  frame_free_resources(frame);
+  frame->header.type = KL_FRAME_TYPE_GRAPHIC;
+
+  frame->graphic.material = kl_material_incref(path);
+}
+
+void kl_frame_delete(kl_frame_t *frame) {
+  kl_frame_header_t *header = &frame->header;
+
+  kl_frame_t *child;
+  for (int i=0; i < kl_array_size(&header->children); i++) {
+    kl_array_get(&header->children, i, &child);
+    kl_frame_delete(child);
+  }
+  kl_array_free(&header->children);
+  
+  frame_free_resources(frame);
 
   free(frame);
 }

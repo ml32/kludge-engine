@@ -1,6 +1,7 @@
 #include "vid.h"
 #include "input.h"
 #include "renderer.h"
+#include "resource.h"
 
 #include "terrain.h"
 #include "model.h"
@@ -11,6 +12,8 @@
 
 int main(int argc, char **argv) {
   kl_evt_generic_t evt;
+
+  kl_resource_add_dir("./test_assets/", "");
 
   if (kl_vid_init() < 0) return -1;
   if (kl_input_init() < 0) return -1;
@@ -36,11 +39,11 @@ int main(int argc, char **argv) {
   kl_render_add_model(model2);
 
   kl_vec3f_t light1_pos = { .x = 500.0f, .y = 300.0f, .z = 0.0f };
-  kl_render_add_light(&light1_pos, 1.0f, 0.8f, 0.5f, 40000.0f);
+  kl_render_add_light(&light1_pos, 1.0f, 0.8f, 0.5f, 100000.0f);
   kl_vec3f_t light2_pos = { .x = -500.0f, .y = 300.0f, .z = 0.0f };
-  kl_render_add_light(&light2_pos, 0.8f, 0.8f, 1.0f, 40000.0f);
+  kl_render_add_light(&light2_pos, 0.8f, 0.8f, 1.0f, 100000.0f);
   kl_vec3f_t envlight_dir = { -2.0f, -2.0f, 1.0f };
-  kl_render_set_envlight(&envlight_dir, 0.8f, 0.8f, 1.0f, 0.6f, 1.0f, 0.9f, 0.6f, 0.2f);
+  kl_render_set_envlight(&envlight_dir, 0.8f, 0.8f, 1.0f, 0.2f, 1.0f, 0.9f, 0.6f, 0.01f);
   
   int move_f = 0;
   int move_b = 0;

@@ -7,55 +7,72 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <assert.h>
 
-static kl_texture_t *texture_load(char *path);
+static kl_texture_t *texture_load(char *path, char *vpath);
 static void texture_free(kl_texture_t *texture);
 static void texture_load_default_diffuse(char* path, kl_texture_t *texture);
 static void texture_load_default_specular(char* path, kl_texture_t *texture);
 static void texture_load_default_normal(char* path, kl_texture_t *texture);
 static void texture_load_default_emissive(char* path, kl_texture_t *texture);
 
-static kl_resources_t resources = {
-  .load = (kl_resources_load_cb)&texture_load,
-  .free = (kl_resources_free_cb)&texture_free
-};
+static kl_resource_loader_t *loader = NULL;
 
 /* ----------------- */
 kl_texture_t *kl_texture_incref(char *path) {
-  kl_texture_t *texture = kl_resources_incref(&resources, path);
-  if (texture == NULL) return 0;
+  static char buf[256];
+
+  if (loader == NULL) {
+    loader = kl_resource_loader_new((kl_resources_load_cb)&texture_load, (kl_resources_free_cb)&texture_free);
+    kl_resource_add_entry("", "DEFAULT_DIFFUSE");
+    kl_resource_add_entry("", "DEFAULT_SPECULAR");
+    kl_resource_add_entry("", "DEFAULT_NORMAL");
+    kl_resource_add_entry("", "DEFAULT_EMISSIVE");
+  }
+  kl_resource_id_t resid = kl_resource_getid(path);
+  kl_texture_t *texture = kl_resource_incref(loader, resid);
+  if (texture == NULL) {
+    snprintf(buf, 256, "%s.png", path);
+    kl_resource_id_t resid = kl_resource_getid(buf);
+    texture = kl_resource_incref(loader, resid);
+  }
+  kl_resource_printall();
+  printf("%s, %s, %016llx\n", path, buf, resid);
+
   return texture;
 }
 
 void kl_texture_decref(kl_texture_t *texture) {
-  kl_resources_decref(&resources, texture->path);
+  kl_resource_id_t resid = kl_resource_getid(texture->path);
+  kl_resource_decref(resid);
 }
 
 /* ---------------- */
-static kl_texture_t *texture_load(char *path) {
+static kl_texture_t *texture_load(char *path, char *vpath) {
   kl_texture_t *texture = malloc(sizeof(kl_texture_t));
 
-  if (strcmp(path, "DEFAULT_DIFFUSE") == 0) {
+  printf("%s\n", vpath);
+  if (strcmp(vpath, "DEFAULT_DIFFUSE") == 0) {
     texture_load_default_diffuse(path, texture);
     return texture;
   }
-  if (strcmp(path, "DEFAULT_SPECULAR") == 0) {
+  if (strcmp(vpath, "DEFAULT_SPECULAR") == 0) {
     texture_load_default_specular(path, texture);
     return texture;
   }
-  if (strcmp(path, "DEFAULT_NORMAL") == 0) {
+  if (strcmp(vpath, "DEFAULT_NORMAL") == 0) {
     texture_load_default_normal(path, texture);
     return texture;
   }
-  if (strcmp(path, "DEFAULT_EMISSIVE") == 0) {
+  if (strcmp(vpath, "DEFAULT_EMISSIVE") == 0) {
     texture_load_default_emissive(path, texture);
     return texture;
   }
 
-  char buf[256];
-  snprintf(buf, 256, "test_assets/%s.png", path);
-  kl_texture_loadpng(buf, texture);
-  return texture;
+  if (kl_texture_loadpng(path, texture)) return texture;
+  
+  free(texture);
+  return NULL;
 }
 
 static void texture_free(kl_texture_t *texture) {

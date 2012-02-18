@@ -3,6 +3,8 @@
 
 #include "texture.h"
 
-void kl_texture_loadpng(char* path, kl_texture_t *texture);
+#include <stdbool.h>
+
+bool kl_texture_loadpng(char* path, kl_texture_t *texture);
 
 #endif /* KL_TEXTURE_PNG_H */
