@@ -3,6 +3,8 @@
 
 #include "renderer.h"
 
+#include <stdbool.h>
+
 #include "camera.h"
 #include "model.h"
 
@@ -27,7 +29,7 @@ void kl_gl3_debugtex(int mode); /* show output of various buffers */
 unsigned int kl_gl3_upload_vertdata(void *data, int n);
 void kl_gl3_update_vertdata(unsigned int vbo, void *data, int n);
 unsigned int kl_gl3_upload_tris(unsigned int *data, int n);
-unsigned int kl_gl3_upload_texture(void *data, int w, int h, int format, int type);
+unsigned int kl_gl3_upload_texture(void *data, int w, int h, int format, bool clamp, bool filter);
 unsigned int kl_gl3_upload_light(kl_vec3f_t *position, float r, float g, float b, float intensity);
 void kl_gl3_update_scene(kl_scene_t *scene);
 void kl_gl3_update_envlight(kl_vec3f_t *direction, float amb_r, float amb_g, float amb_b, float amb_intensity, float diff_r, float diff_g, float diff_b, float diff_intensity);

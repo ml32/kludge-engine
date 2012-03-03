@@ -92,8 +92,8 @@ unsigned int kl_render_upload_tris(unsigned int *data, int n) {
   return kl_gl3_upload_tris(data, n);
 }
 
-unsigned int kl_render_upload_texture(void *data, int w, int h, int format, int type) {
-  return kl_gl3_upload_texture(data, w, h, format, type);
+unsigned int kl_render_upload_texture(void *data, int w, int h, int format, bool clamp, bool filter) {
+  return kl_gl3_upload_texture(data, w, h, format, clamp, filter);
 }
 
 void kl_render_free_texture(unsigned int texture) {

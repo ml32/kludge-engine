@@ -1,10 +1,9 @@
-#define _BSD_SOURCE /* need strsep() */
-
 #include "material-mtl.h"
 
 #include "material.h"
 #include "resource.h"
 #include "array.h"
+#include "strsep.h"
 
 #include <stdint.h>
 #include <string.h>

@@ -7,23 +7,24 @@
 
 #include <stdio.h>
 #include <stdlib.h>
- #include <string.h>
+#include <string.h>
 #include <assert.h>
 
+/*
 #define GL3_PROTOTYPES
 #include <GL3/gl3.h>
 #define GL_TEXTURE_MAX_ANISOTROPY_EXT     0x84FE
 #define GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT 0x84FF
+*/
+#include <GL/glew.h>
 
 #include "renderer-gl3-meshdata.c"
 #include "renderer-gl3-shaders.c"
 
 static float anisotropy = 4.0f;
-static int mipbias = 2;
+static int mipbias = 0;
 
 static int convertenum(int value);
-static int typesize(int value);
-static int channels(int value);
 static int create_shader(char *name, int type, const char *src, unsigned int *shader);
 static int create_program(char *name, unsigned int vshader, unsigned int fshader, unsigned int *program);
 static int init_gbuffer(int width, int height);
@@ -40,6 +41,7 @@ static unsigned int tex_lighting;
 static unsigned int fbo_lighting;
 static unsigned int ubo_envlight;
 static unsigned int ubo_scene;
+static unsigned int tex_noise;
 
 static unsigned int gbuffer_fshader;
 static unsigned int gbuffer_vshader;
@@ -68,6 +70,7 @@ static unsigned int ssao_fshader;
 static unsigned int ssao_program;
 static int ssao_uniform_tdepth;
 static int ssao_uniform_tnormal;
+static int ssao_uniform_tnoise;
 static unsigned int ssao_tex_occlusion[6];
 static unsigned int ssao_fbo[6];
 
@@ -144,6 +147,8 @@ typedef struct uniform_scene {
   kl_mat4f_t   vpmatrix;
   kl_vec4f_t   viewpos;
   kl_mat3x4f_t viewrot;
+  kl_vec4f_t   viewport;
+  float        near, far;
 } uniform_scene_t;
 
 typedef struct uniform_light {
@@ -169,6 +174,13 @@ static char logbuffer[LOGBUFFER_SIZE];
 int kl_gl3_init() {
   int w, h;
   kl_vid_size(&w, &h);
+
+  glewExperimental = GL_TRUE; /* Dunno why this is necessary.  Renderbuffers shouldn't be "experimental"... :\ */
+  GLenum err = glewInit();
+  if (err != GLEW_OK) {
+    fprintf(stderr, "Failed to load GLEW: %s\n", glewGetErrorString(err));
+    return -1;
+  }
 
   glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 
@@ -257,7 +269,10 @@ void kl_gl3_update_scene(kl_scene_t *scene) {
       .column[0] = { .x = viewrot->column[0].x, .y = viewrot->column[0].y, .z = viewrot->column[0].z, .w = 0.0f },
       .column[1] = { .x = viewrot->column[1].x, .y = viewrot->column[1].y, .z = viewrot->column[1].z, .w = 0.0f },
       .column[2] = { .x = viewrot->column[2].x, .y = viewrot->column[2].y, .z = viewrot->column[2].z, .w = 0.0f }
-    }
+    },
+	.viewport    = scene->viewport,
+	.near        = scene->near,
+	.far         = scene->far
   };
 
   glBindBuffer(GL_UNIFORM_BUFFER, ubo_scene);
@@ -318,6 +333,8 @@ void kl_gl3_end_pass_gbuffer() {
   glUseProgram(ssao_program);
   glBindVertexArray(vao_pquad);
 
+  glBindBufferBase(GL_UNIFORM_BUFFER, 0, ubo_scene);
+
   for (int i=0; i < 6; i++) {
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, ssao_fbo[i]);
     unsigned int attachments[] = {GL_COLOR_ATTACHMENT0};
@@ -330,6 +347,10 @@ void kl_gl3_end_pass_gbuffer() {
     glUniform1i(ssao_uniform_tnormal, 1);
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_RECTANGLE, gbuffer_tex_normal[i]);
+
+    glUniform1i(ssao_uniform_tnoise, 2);
+    glActiveTexture(GL_TEXTURE2);
+    glBindTexture(GL_TEXTURE_2D, tex_noise);
 
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0); 
   }
@@ -595,11 +616,11 @@ void kl_gl3_debugtex(int mode) {
       break;
     case 3:
       blit_to_screen(ssao_tex_occlusion[0], 1.0, 1.0, 0.0, 0.0, -1.0, 1.0);
-      blit_to_screen(ssao_tex_occlusion[1], 0.18, 0.18, -0.78, -0.785, 1.0, 0.0);
-      blit_to_screen(ssao_tex_occlusion[2], 0.18, 0.18, -0.39, -0.785, 1.0, 0.0);
-      blit_to_screen(ssao_tex_occlusion[3], 0.18, 0.18,  0.0,  -0.785, 1.0, 0.0);
-      blit_to_screen(ssao_tex_occlusion[4], 0.18, 0.18,  0.39, -0.785, 1.0, 0.0);
-      blit_to_screen(ssao_tex_occlusion[5], 0.18, 0.18,  0.78, -0.785, 1.0, 0.0);
+      blit_to_screen(ssao_tex_occlusion[1], 0.18, 0.18, -0.78, -0.785, -1.0, 1.0);
+      blit_to_screen(ssao_tex_occlusion[2], 0.18, 0.18, -0.39, -0.785, -1.0, 1.0);
+      blit_to_screen(ssao_tex_occlusion[3], 0.18, 0.18,  0.0,  -0.785, -1.0, 1.0);
+      blit_to_screen(ssao_tex_occlusion[4], 0.18, 0.18,  0.39, -0.785, -1.0, 1.0);
+      blit_to_screen(ssao_tex_occlusion[5], 0.18, 0.18,  0.78, -0.785, -1.0, 1.0);
       break;
   }
 }
@@ -630,41 +651,8 @@ unsigned int kl_gl3_upload_tris(unsigned int *data, int n) {
   return ebo;
 }
 
-unsigned int kl_gl3_upload_texture(void *data, int w, int h, int format, int type) {
-  unsigned int texture;
-  
-  int gltype = convertenum(type);
-  if (gltype == GL_FALSE) {
-    fprintf(stderr, "Render: Bad pixel type! (%x)\n", type);
-    return 0;
-  }
-  int glfmt = convertenum(format);
-  if (glfmt == GL_FALSE) {
-    fprintf(stderr, "Render: Bad texture format! (%x)\n", format);
-    return 0;
-  }
-  int glifmt;
-  switch (format) {
-    case KL_RENDER_RGB:
-      glifmt = GL_SRGB;
-      break;
-    case KL_RENDER_RGBA:
-      glifmt = GL_SRGB_ALPHA;
-      break;
-    default:
-      glifmt = glfmt;
-      break;
-  }
-
-  glGenTextures(1, &texture);
-  glBindTexture(GL_TEXTURE_2D, texture);
-
-  assert(type == KL_RENDER_UINT8);
-  int c = channels(format);
-  int bytes = w * h * c * typesize(type);
-  uint8_t *buf = malloc(bytes);
-  memcpy(buf, data, bytes);
-  for (int i=0; i < mipbias; i++) {
+static void downsample(uint8_t *buf, int w, int h, int c, int bias) {
+  for (int i=0; i < bias; i++) {
     w >>= 1;
     h >>= 1;
     if (w <= 0 || h <= 0) break;
@@ -688,26 +676,107 @@ unsigned int kl_gl3_upload_texture(void *data, int w, int h, int format, int typ
       }
     }
   }
-  glTexImage2D(GL_TEXTURE_2D, 0, glifmt, w, h, 0, glfmt, gltype, buf);
-  glGenerateMipmap(GL_TEXTURE_2D);
+}
 
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+unsigned int kl_gl3_upload_texture(void *data, int w, int h, int format, bool clamp, bool filter) {
+  unsigned int texture;
+  
+  int glfmt, glifmt, channels;
+  switch (format) {
+    case KL_TEXFMT_I:
+	  glfmt    = GL_RED;
+	  glifmt   = GL_RED;
+    channels = 1;
+	  break;
+	case KL_TEXFMT_IA:
+	  glfmt    = GL_RG;
+	  glifmt   = GL_RG;
+    channels = 2;
+	  break;
+	case KL_TEXFMT_RGB:
+	  glfmt    = GL_RGB;
+	  glifmt   = GL_SRGB;
+    channels = 3;
+	  break;
+	case KL_TEXFMT_BGR:
+	  glfmt    = GL_BGR;
+	  glifmt   = GL_SRGB;
+    channels = 3;
+	  break;
+	case KL_TEXFMT_RGBA:
+	  glfmt    = GL_RGBA;
+	  glifmt   = GL_SRGB_ALPHA;
+    channels = 4;
+	  break;
+	case KL_TEXFMT_BGRA:
+	  glfmt    = GL_BGRA;
+	  glifmt   = GL_SRGB_ALPHA;
+    channels = 4;
+	  break;
+	case KL_TEXFMT_X:
+	  glfmt    = GL_RED;
+	  glifmt   = GL_RED;
+    channels = 1;
+	  break;
+	case KL_TEXFMT_XY:
+	  glfmt    = GL_RG;
+	  glifmt   = GL_RG;
+    channels = 2;
+	  break;
+	case KL_TEXFMT_XYZ:
+	  glfmt    = GL_RGB;
+	  glifmt   = GL_RGB;
+    channels = 3;
+	  break;
+	case KL_TEXFMT_XYZW:
+	  glfmt    = GL_RGBA;
+	  glifmt   = GL_RGBA;
+    channels = 4;
+	  break;
+	default:
+      fprintf(stderr, "Render: Bad texture format! (%x)\n", format);
+	  return 0;
+  }
+
+  glGenTextures(1, &texture);
+  glBindTexture(GL_TEXTURE_2D, texture);
+
+  int bytes = w * h * channels;
+  uint8_t *buf = malloc(bytes);
+  memcpy(buf, data, bytes);
+  if (filter) {
+    downsample(buf, w, h, channels, mipbias);
+  }
+  glTexImage2D(GL_TEXTURE_2D, 0, glifmt, w, h, 0, glfmt, GL_UNSIGNED_BYTE, buf);
+  
+  if (filter) {
+    glGenerateMipmap(GL_TEXTURE_2D);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, anisotropy);
+  } else {
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  }
+  
+  if (clamp) {
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  } else {
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+  }
 
   /* greyscale swizzles */
   switch (format) {
-    case KL_RENDER_GRAYA:
+    case KL_TEXFMT_IA:
       glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A, GL_GREEN);
-    case KL_RENDER_GRAY:
+    case KL_TEXFMT_I:
       glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_R, GL_RED);
       glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_G, GL_RED);
       glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_B, GL_RED);
       break;
   }
-
-  glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, anisotropy);
 
   glBindTexture(GL_TEXTURE_2D, 0);
 
@@ -771,52 +840,18 @@ unsigned int kl_gl3_define_attribs(int tris, kl_render_attrib_t *cfg, int n) {
 
 static int convertenum(int value) {
   switch (value) {
-    case KL_RENDER_FLOAT:
-      return GL_FLOAT;
-    case KL_RENDER_UINT8:
-      return GL_UNSIGNED_BYTE;
-    case KL_RENDER_UINT16:
-      return GL_UNSIGNED_SHORT;
-    case KL_RENDER_RGB:
-      return GL_RGB;
-    case KL_RENDER_RGBA:
-      return GL_RGBA;
-    case KL_RENDER_GRAY:
-      return GL_RED;
-    case KL_RENDER_GRAYA:
-      return GL_RG;
     case KL_RENDER_CW:
       return GL_CW;
     case KL_RENDER_CCW:
       return GL_CCW;
+    case KL_RENDER_UINT8:
+      return GL_UNSIGNED_BYTE;
+    case KL_RENDER_UINT16:
+      return GL_UNSIGNED_SHORT;
+    case KL_RENDER_FLOAT:
+      return GL_FLOAT;
   }
   return GL_FALSE;
-}
-
-static int typesize(int value) {
-  switch (value) {
-    case KL_RENDER_FLOAT:
-      return 4;
-    case KL_RENDER_UINT8:
-      return 1;
-    case KL_RENDER_UINT16:
-      return 2;
-  }
-  return 0;
-}
-
-static int channels(int value){
-  switch (value) {
-    case KL_RENDER_RGB:
-      return 3;
-    case KL_RENDER_RGBA:
-      return 4;
-    case KL_RENDER_GRAY:
-      return 1;
-    case KL_RENDER_GRAYA:
-      return 2;
-  }
-  return 0;
 }
 
 static int create_shader(char *name, int type, const char *src, unsigned int *shader) {
@@ -872,8 +907,8 @@ static int init_gbuffer(int width, int height) {
   for (int i=0; i < 6; i++) {
     glBindTexture(GL_TEXTURE_RECTANGLE, gbuffer_tex_depth[i]);
     glTexImage2D(GL_TEXTURE_RECTANGLE, 0, GL_R32F, w, h, 0, GL_RED, GL_FLOAT, NULL);
-    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_SWIZZLE_R, GL_RED);
@@ -882,8 +917,8 @@ static int init_gbuffer(int width, int height) {
 
     glBindTexture(GL_TEXTURE_RECTANGLE, gbuffer_tex_normal[i]);
     glTexImage2D(GL_TEXTURE_RECTANGLE, 0, GL_RG16, w, h, 0, GL_RG, GL_UNSIGNED_SHORT, NULL);
-    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
@@ -965,6 +1000,20 @@ static int init_gbuffer(int width, int height) {
 }
 
 static int init_ssao(int width, int height) {
+  float noise[256*256*4];
+  for (int i = 0; i < 256*256*4; i++) {
+    noise[i] = (float)rand() / (float)RAND_MAX;
+  }
+  glGenTextures(1, &tex_noise);
+  glBindTexture(GL_TEXTURE_2D, tex_noise);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, 256, 256, 0, GL_RGBA, GL_FLOAT, noise);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  glBindTexture(GL_TEXTURE_2D, 0);
+  
+
   glGenTextures(6, ssao_tex_occlusion);
 
   int w = width;
@@ -1002,8 +1051,10 @@ static int init_ssao(int width, int height) {
   if (create_shader("ssao fragment shader", GL_FRAGMENT_SHADER, fshader_ssao_src, &ssao_fshader) < 0) return -1;
   if (create_program("ssao shader program", ssao_vshader, ssao_fshader, &ssao_program) < 0) return -1;
 
+  bind_ubo(ssao_program, "scene", 0);
   ssao_uniform_tdepth  = glGetUniformLocation(ssao_program, "tdepth");
   ssao_uniform_tnormal = glGetUniformLocation(ssao_program, "tnormal");
+  ssao_uniform_tnoise  = glGetUniformLocation(ssao_program, "tnoise");
 
   if (create_shader("upsampling vertex shader", GL_VERTEX_SHADER, vshader_upsample_src, &upsample_vshader) < 0) return -1;
   if (create_shader("upsampling fragment shader", GL_FRAGMENT_SHADER, fshader_upsample_src, &upsample_fshader) < 0) return -1;

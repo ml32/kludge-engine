@@ -8,10 +8,14 @@
 "  uniform mat4 vpmatrix;\n"\
 "  uniform vec3 viewpos;\n"\
 "  uniform mat3 viewrot;\n"\
+"  uniform vec4 viewport;\n"\
+"  uniform float near;\n"\
+"  uniform float far;\n"\
 "};\n"
 
 #define DEF_NORMAL_ENCODING \
 "vec2 encode_normal(vec3 n) {\n"\
+"  n = normalize(n);\n"\
 "  float scale = sqrt(2.0/(1.0 + n.z));\n"\
 "  return n.xy * scale * 0.5 + 0.5;\n"\
 "}\n"\
@@ -20,7 +24,7 @@
 "  float lensq = dot(xy, xy);\n"\
 "  float xyscale = sqrt(1.0 - lensq / 4.0);\n"\
 "  float zscale  = lensq / 2.0 - 1.0;\n"\
-"  return vec3(xy * xyscale, -zscale);\n"\
+"  return normalize(vec3(xy * xyscale, -zscale));\n"\
 "}\n"
 
 static const char *vshader_gbuffer_src =
@@ -38,7 +42,7 @@ DEF_BLOCK_SCENE
 "  ftexcoord = vtexcoord;\n"
 "\n"
 "  vec3 vbitangent = cross(vnormal, vtangent.xyz) * vtangent.w;\n"
-"  tbnmatrix = viewrot * mat3(vtangent.xyz, vbitangent, vnormal);\n"
+"  tbnmatrix = viewrot * mat3(normalize(vtangent.xyz), normalize(vbitangent), normalize(vnormal));\n"
 "\n"
 "  gl_Position = vpmatrix * vec4(vposition, 1.0);\n"
 "}\n";
@@ -117,8 +121,10 @@ static const char *vshader_ssao_src =
 
 static const char *fshader_ssao_src = 
 "#version 330\n"
+DEF_BLOCK_SCENE
 "uniform sampler2DRect tdepth;\n"
 "uniform sampler2DRect tnormal;\n"
+"uniform sampler2D tnoise;\n"
 "smooth in vec3 fray_eye;\n"
 "layout(location = 0) out float ssao;\n"
 DEF_NORMAL_ENCODING
@@ -134,25 +140,15 @@ DEF_NORMAL_ENCODING
 "  vec3  coord  = fray_eye * depth;\n"
 "  vec3  normal = decode_normal(texture(tnormal, gl_FragCoord.xy).rg);\n"
 ""
-"  float screen_scale = clamp(1024.0 / (depth + 256.0), 1.0, 4.0);\n"
-"  vec2  sample_offsets[8] = vec2[](\n" /* eye-space x/y offsets */
-"    vec2(-1.414,  0.0),\n"
-"    vec2( 1.414,  0.0),\n"
-"    vec2( 0.0, -1.414),\n"
-"    vec2( 0.0,  1.414),\n"
-"    vec2(-1.0, -1.0),\n"
-"    vec2(-1.0,  1.0),\n"
-"    vec2( 1.0, -1.0),\n"
-"    vec2( 1.0,  1.0)\n"
-"  );\n"
 "  float occlusion = 0.0;\n"
-"  for (int i=0; i < 8; i++) {\n"
-"    float occluder_depth  = texture(tdepth, sample_offsets[i] + gl_FragCoord.xy).r;\n"
-"    vec3  occluder_offset = vec3(sample_offsets[i], depth - occluder_depth);\n" /* offset in eye-space */
-"    vec3  occluder_normal = decode_normal(texture(tnormal, sample_offsets[i] + gl_FragCoord.xy).rg);\n"
+"  for (int i=0; i < 25; i++) {\n"
+"    vec2  offset = 4.0 * normalize(texture(tnoise, (gl_FragCoord.xy + vec2(1 << (i / 5), 1 << (i % 5))) / 256.0).xyz * 2.0 - 1.0).xy;\n"
+"    float occluder_depth  = texture(tdepth, gl_FragCoord.xy + offset).r;\n"
+"    vec3  occluder_coord  = fray_eye * occluder_depth;\n"
+"    vec3  occluder_offset = occluder_coord - coord;\n" /* offset in eye-space */
 "    occlusion += calc_ao(occluder_offset, normal);\n"
 "  };\n"
-"  ssao = occlusion / (8.0 * 6.0);\n"
+"  ssao = occlusion / (25.0 * 6.0);\n"
 "}\n";
 
 static const char *vshader_upsample_src =
@@ -244,16 +240,18 @@ DEF_NORMAL_ENCODING
 "  float dist  = distance(flightpos, coord);\n"
 "  float luminance = light.color.a / (dist * dist);\n"
 ""
-"  vec3 norm = decode_normal(texture(tnormal, gl_FragCoord.xy).xy);\n"
+"  vec3 N = decode_normal(texture(tnormal, gl_FragCoord.xy).xy);\n"
 ""
-"  vec3 lightdir = normalize(flightpos - coord);\n"
-"  vec3 eyedir   = -normalize(fray);\n"
-"  vec3 reflect  = 2.0 * norm * dot(norm, lightdir) - lightdir;\n"
+"  vec3 L = normalize(flightpos - coord);\n"
+"  vec3 V = -normalize(fray);\n"
+"  vec3 H = normalize(L + V);\n"
+"  vec3 R  = 2.0 * N * dot(N, L) - L;\n"
+"  float fresnel = 0.25 + 0.75 * pow(1.0 - dot(V, H), 5.0);\n"
 ""
 "  vec3 diff  = texture(tdiffuse, gl_FragCoord.xy).rgb;\n"
 "  vec4 spec  = texture(tspecular, gl_FragCoord.xy);\n"
-"  color.rgb  = diff * max(0.0, dot(norm, lightdir));\n" /* diffuse */
-"  color.rgb += spec.rgb * pow(max(0.0, dot(reflect, eyedir)), spec.a*255.0);\n" /* specular */
+"  color.rgb  = diff * max(0.0, dot(N, L));\n" /* diffuse */
+"  color.rgb += spec.rgb * fresnel * pow(max(0.0, dot(R, V)), spec.a*255.0);\n" /* specular */
 "  color.rgb *= light.color.rgb * luminance;\n"
 "  color.a    = 1.0;\n"
 "}\n";
@@ -295,19 +293,21 @@ DEF_NORMAL_ENCODING
 "  vec3  coord_eye = fray_eye * depth;\n"
 "  vec3  coord_world = fray_world * depth + viewpos;\n"
 ""
-"  vec3 norm = decode_normal(texture(tnormal, gl_FragCoord.xy).xy);\n"
+"  vec3 N = decode_normal(texture(tnormal, gl_FragCoord.xy).xy);\n"
 ""
 "  float occlusion = pow(1.0 - max(0.0, texture(tocclusion, gl_FragCoord.xy).r), 2.0);\n"
 ""
-"  vec3 lightdir = normalize(viewrot * -light.direction.xyz);\n"
-"  vec3 eyedir   = -normalize(fray_eye);\n"
-"  vec3 reflect  = 2.0 * norm * dot(norm, lightdir) - lightdir;\n"
+"  vec3 L = normalize(viewrot * -light.direction.xyz);\n"
+"  vec3 V = -normalize(fray_eye);\n"
+"  vec3 H = normalize(L + V);\n"
+"  vec3 R = 2.0 * N * dot(N, L) - L;\n"
+"  float fresnel = 0.25 + 0.75 * pow(1.0 - dot(V, H), 5.0);\n"
 ""
 "  vec3 diff  = texture(tdiffuse, gl_FragCoord.xy).rgb;\n"
 "  vec4 spec  = texture(tspecular, gl_FragCoord.xy);\n"
 "  vec4 glow  = texture(temissive, gl_FragCoord.xy);\n"
-"  color.rgb += diff * max(0.0, dot(norm, lightdir));\n" /* diffuse */
-"  color.rgb += spec.rgb * pow(max(0.0, dot(reflect, eyedir)), spec.a*255.0);\n" /* specular */
+"  color.rgb += diff * max(0.0, dot(N, L));\n" /* diffuse */
+"  color.rgb += spec.rgb * fresnel * pow(max(0.0, dot(R, V)), spec.a*255.0);\n" /* specular */
 "  color.rgb *= light.color.rgb * light.color.a;\n" /* diffuse/specular scale */
 "  color.rgb += diff * light.ambient.rgb * light.ambient.a * occlusion;\n" /* ambient */
 "  color.rgb += glow.rgb * exp2(glow.a * 16.0 - 8.0);\n" /* emissive */
@@ -325,12 +325,15 @@ static const char *fshader_tonemap_src =
 "#version 330\n"
 "uniform sampler2DRect tcomposite;\n"
 "layout(location = 0) out vec4 color;\n"
-"vec3 tonemap(vec3 color, float exposure) {\n"
-"  return 1.047 / (1.0 + exp(-6.0 * color * exp2(exposure) + 3.0)) - 0.047;\n"
+"vec3 tonemap(vec3 color, float sigma) {\n"
+"  color     = max(vec3(0.0, 0.0, 0.0), color);\n"
+"  vec3  c2  = color * color;\n"
+"  float var = sigma * sigma;\n"
+"  return c2/(c2+var);\n"
 "}\n"
 "void main() {\n"
 "  vec3 c = texture(tcomposite, gl_FragCoord.xy).rgb;\n"
-"  color = vec4(tonemap(c, 0.2), 1.0);\n"
+"  color = vec4(tonemap(c, 0.5), 1.0);\n"
 "}\n";
 
 static const char *vshader_blit_src =

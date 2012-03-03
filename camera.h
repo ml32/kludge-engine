@@ -13,6 +13,9 @@ typedef struct kl_scene {
   kl_vec3f_t viewpos;
   kl_vec3f_t ray_eye[4];
   kl_vec3f_t ray_world[4];
+  kl_vec4f_t viewport;
+  float      near;
+  float      far;
 } kl_scene_t;
 
 typedef struct kl_frustum {
@@ -25,6 +28,7 @@ typedef struct kl_camera {
   kl_quat_t    orientation;
   float        aspect;
   float        fov; /* in radians! */
+  kl_vec4f_t   viewport;
   float        near, far;
 } kl_camera_t;
 

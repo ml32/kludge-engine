@@ -94,7 +94,7 @@ static void texture_load_default_diffuse(char *path, kl_texture_t *texture) {
   strncpy(texture->path, path, KL_TEXTURE_PATHLEN);
   texture->w  = 0x40;
   texture->h  = 0x40;
-  texture->id = kl_render_upload_texture(buf, 0x40, 0x40, KL_RENDER_RGBA, KL_RENDER_UINT8);
+  texture->id = kl_render_upload_texture(buf, 0x40, 0x40, KL_TEXFMT_RGBA, false, true);
   free(buf);
 }
 
@@ -108,7 +108,7 @@ static void texture_load_default_specular(char *path, kl_texture_t *texture) {
   strncpy(texture->path, path, KL_TEXTURE_PATHLEN);
   texture->w  = 0x10;
   texture->h  = 0x10;
-  texture->id = kl_render_upload_texture(buf, 0x10, 0x10, KL_RENDER_RGBA, KL_RENDER_UINT8);
+  texture->id = kl_render_upload_texture(buf, 0x10, 0x10, KL_TEXFMT_RGBA, false, true);
   free(buf);
 }
   
@@ -122,7 +122,7 @@ static void texture_load_default_normal(char *path, kl_texture_t *texture) {
   strncpy(texture->path, path, KL_TEXTURE_PATHLEN);
   texture->w  = 0x10;
   texture->h  = 0x10;
-  texture->id = kl_render_upload_texture(buf, 0x10, 0x10, KL_RENDER_RGBA, KL_RENDER_UINT8);
+  texture->id = kl_render_upload_texture(buf, 0x10, 0x10, KL_TEXFMT_XYZW, false, true);
   free(buf);
 }
 
@@ -136,7 +136,7 @@ static void texture_load_default_emissive(char *path, kl_texture_t *texture) {
   strncpy(texture->path, path, KL_TEXTURE_PATHLEN);
   texture->w  = 0x10;
   texture->h  = 0x10;
-  texture->id = kl_render_upload_texture(buf, 0x10, 0x10, KL_RENDER_RGBA, KL_RENDER_UINT8);
+  texture->id = kl_render_upload_texture(buf, 0x10, 0x10, KL_TEXFMT_RGBA, false, true);
   free(buf);
 }
 

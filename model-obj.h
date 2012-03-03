@@ -4,8 +4,9 @@
 #include "model.h"
 
 #include <stdint.h>
+#include <stdbool.h>
 
-int kl_model_isobj(uint8_t *data, int size);
+bool kl_model_isobj(uint8_t *data, int size);
 kl_model_t* kl_model_loadobj(uint8_t *data, int size);
 
 #endif /* KL_MDLOBJ_H */

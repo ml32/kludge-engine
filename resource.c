@@ -1,8 +1,6 @@
-#define _BSD_SOURCE /* need d_type */
-#include <sys/types.h>
-#include <dirent.h>
-
 #include "resource.h"
+
+#include "array.h"
 
 #include <errno.h>
 
@@ -12,12 +10,21 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <dirent.h>
+
 
 #define KL_RESOURCE_BUCKETS 0x1000
 typedef struct resources {
   kl_resource_item_t *buckets[KL_RESOURCE_BUCKETS];
 } resources_t;
 static resources_t resource_cache;
+
+typedef struct diritem {
+  char name[KL_RESITEM_PATHLEN];
+  bool isdir;
+} diritem_t;
 
 kl_resource_id_t kl_resource_getid(char *str) {
   kl_resource_id_t h = 0;
@@ -74,55 +81,87 @@ int kl_resource_add_entry(char *path, char *vpath) {
   return 0;
 }
 
-int kl_resource_add_dir(char *path, char *vpath) {
+static int listdir(char *path, kl_array_t *items) {
+  printf("%s\n", path);
+    
   DIR *dir = opendir(path);
   if (dir == NULL) {
-    fprintf(stderr, "Resource Manager: Failed to add directory %s!\n\tDetails: %s\n", path, strerror(errno));
+    fprintf(stderr, "Resource Manager: Failed to read directory %s!\n\tDetails: %s\n", path, strerror(errno));
     return -1;
   }
+  
+  kl_array_init(items, sizeof(diritem_t));
+
+  struct dirent *ent;
+  struct stat    s;
+  diritem_t      item;
+  while ((ent = readdir(dir)) != NULL) {
+    printf("\t%s\n", ent->d_name);
+    char fullpath[KL_RESITEM_PATHLEN];
+    snprintf(fullpath, KL_RESITEM_PATHLEN, "%s/%s", path, ent->d_name);
+    fullpath[KL_RESITEM_PATHLEN-1] = '\0';
+    
+    stat(fullpath, &s);
+    printf("%s, %x\n", fullpath, s.st_mode);
+    if (S_ISDIR(s.st_mode)) {
+      if (strcmp(ent->d_name, "..") == 0) continue;
+      if (strcmp(ent->d_name, ".") == 0) continue;
+
+      strncpy(item.name, ent->d_name, KL_RESITEM_PATHLEN);
+      item.name[KL_RESITEM_PATHLEN-1] = '\0';
+      item.isdir = true;
+      kl_array_push(items, &item);
+    } else if (S_ISREG(s.st_mode)) {
+      strncpy(item.name, ent->d_name, KL_RESITEM_PATHLEN);
+      item.name[KL_RESITEM_PATHLEN-1] = '\0';
+      item.isdir = false;
+      kl_array_push(items, &item);
+    }
+  }
+  
+  closedir(dir);
+  return 0;
+}
+
+int kl_resource_add_dir(char *path, char *vpath) {
 
   char *subpath   = malloc(KL_RESITEM_PATHLEN);
   char *subvpath  = malloc(KL_RESITEM_PATHLEN);
 
   int err = 0;
-
-  struct dirent *entry;
-  while ((entry = readdir(dir)) != NULL) {
-    snprintf(subpath, KL_RESITEM_PATHLEN, "%s/%s", path, entry->d_name);
+  
+  kl_array_t items;
+  if (listdir(path, &items) < 0) goto cleanup;
+  diritem_t item;
+  for (int i = 0; i < kl_array_size(&items); i++) {
+    kl_array_get(&items, i, &item);
+  
+    snprintf(subpath, KL_RESITEM_PATHLEN, "%s/%s", path, item.name);
     subpath[KL_RESITEM_PATHLEN-1] = '\0';
 
-    snprintf(subvpath, KL_RESITEM_PATHLEN, "%s/%s", vpath, entry->d_name);
+    snprintf(subvpath, KL_RESITEM_PATHLEN, "%s/%s", vpath, item.name);
     subvpath[KL_RESITEM_PATHLEN-1] = '\0';
 
-    switch (entry->d_type) {
-      case DT_DIR:
-        if (strcmp(entry->d_name, "..") == 0) break;
-        if (strcmp(entry->d_name, ".") == 0) break;
-
-        err = kl_resource_add_dir(subpath, subvpath);
-        if (err < 0) goto cleanup;
-
-        break;
-      case DT_REG:
-        /* strip pipe characters from virtual path (used internally to indicate
-         * resources within another resource) */
-        for (int i=0; i < 0x100; i++) {
-          if (subvpath[i] == '|') {
-            subvpath[i] = ':';
-          }
+    if (item.isdir) {
+      err = kl_resource_add_dir(subpath, subvpath);
+      if (err < 0) goto cleanup;
+    } else {
+      for (int i=0; i < 0x100; i++) {
+        if (subvpath[i] == '|') {
+          subvpath[i] = ':';
         }
-        err = kl_resource_add_entry(subpath, subvpath);
-        if (err < 0) goto cleanup;
-        break;
+      }
+      err = kl_resource_add_entry(subpath, subvpath);
+      if (err < 0) goto cleanup;
     }
   }
 
   cleanup:
+  
+  kl_array_free(&items);
 
   free(subpath);
   free(subvpath);
-
-  closedir(dir);
 
   return err;
 }
@@ -135,7 +174,7 @@ kl_resource_loader_t* kl_resource_loader_new(kl_resources_load_cb load, kl_resou
   loader->free = free;
   return loader;
 }
- 
+
 void *kl_resource_incref(kl_resource_loader_t *loader, kl_resource_id_t resid) {
   kl_resource_id_t bucket = resid % KL_RESOURCE_BUCKETS;
   kl_resource_item_t *first = resource_cache.buckets[bucket];
@@ -153,7 +192,7 @@ void *kl_resource_incref(kl_resource_loader_t *loader, kl_resource_id_t resid) {
       return curr->item;
     }
   }
-  
+
   return NULL;
 }
 

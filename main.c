@@ -9,6 +9,7 @@
 
 #include <stdio.h>
 #include <math.h>
+#include <stdbool.h>
 
 int main(int argc, char **argv) {
   kl_evt_generic_t evt;
@@ -27,6 +28,7 @@ int main(int argc, char **argv) {
     .orientation = { .r = 1.0f, .i = 0.0f, .j = 0.0f, .k = 0.0f },
     .aspect = (float)w/(float)h,
     .fov = 1.5708f, /* pi/2 rad or 90 deg */
+	.viewport = { .x = 0, .y = 0, .z = w, .w = h },
     .near = 1.0f,
     .far  = 10000.0f
   };
@@ -39,16 +41,16 @@ int main(int argc, char **argv) {
   kl_render_add_model(model2);
 
   kl_vec3f_t light1_pos = { .x = 500.0f, .y = 300.0f, .z = 0.0f };
-  kl_render_add_light(&light1_pos, 1.0f, 0.8f, 0.5f, 100000.0f);
+  kl_render_add_light(&light1_pos, 1.0f, 0.8f, 0.5f, 75000.0f);
   kl_vec3f_t light2_pos = { .x = -500.0f, .y = 300.0f, .z = 0.0f };
-  kl_render_add_light(&light2_pos, 0.8f, 0.8f, 1.0f, 100000.0f);
+  kl_render_add_light(&light2_pos, 0.8f, 0.8f, 1.0f, 25000.0f);
   kl_vec3f_t envlight_dir = { -2.0f, -2.0f, 1.0f };
-  kl_render_set_envlight(&envlight_dir, 0.8f, 0.8f, 1.0f, 0.2f, 1.0f, 0.9f, 0.6f, 0.01f);
+  kl_render_set_envlight(&envlight_dir, 0.8f, 0.8f, 1.0f, 0.05f, 1.0f, 0.9f, 0.6f, 0.05f);
   
-  int move_f = 0;
-  int move_b = 0;
-  int move_l = 0;
-  int move_r = 0;
+  bool move_f = 0;
+  bool move_b = 0;
+  bool move_l = 0;
+  bool move_r = 0;
   kl_vec3f_t mouseangle = { .x = 0.0f, .y = 0.0f, .z = 0.0f };
   for (;;) {
     kl_input_tick();
@@ -58,19 +60,19 @@ int main(int argc, char **argv) {
         case KL_EVT_BUTTON:
           switch (evt.button.code) {
             case KL_BTN_ESC:
-              if (evt.button.state) return 0;
+              if (evt.button.isdown) return 0;
               break;
             case KL_BTN_W:
-              move_f = evt.button.state;
+              move_f = evt.button.isdown;
               break;
             case KL_BTN_A:
-              move_l = evt.button.state;
+              move_l = evt.button.isdown;
               break;
             case KL_BTN_S:
-              move_b = evt.button.state;
+              move_b = evt.button.isdown;
               break;
             case KL_BTN_D:
-              move_r = evt.button.state;
+              move_r = evt.button.isdown;
               break;
             case KL_BTN_1:
               kl_render_set_debug(0);

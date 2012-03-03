@@ -4,6 +4,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <assert.h>
 
 #define IQM_VERSION 2
@@ -100,9 +101,10 @@ typedef struct mat3 {
   float data[9];
 } mat3_t;
 
-int kl_model_isiqm2(uint8_t *data, int size) {
+bool kl_model_isiqm2(uint8_t *data, int size) {
   iqm_header_t *header = (iqm_header_t*)data;
-  if (size < sizeof(iqm_header_t)) return 0;
+  if (data == NULL) return false;
+  if (size < sizeof(iqm_header_t)) return true;
   return header->magic[0] == iqm_magic[0] && header->magic[1] == iqm_magic[1] &&
          header->magic[2] == iqm_magic[2] && header->magic[3] == iqm_magic[3];
 }

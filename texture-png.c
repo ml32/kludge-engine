@@ -33,7 +33,7 @@ bool kl_texture_loadpng(char* path, kl_texture_t *texture) {
   }
  
   /* error handling & cleanup routine */ 
-  if (setjmp(png->jmpbuf) != 0) {
+  if (setjmp(png_jmpbuf(png)) != 0) {
     fprintf(stderr, "image-png: Failed to parse %s\n", path);
     png_destroy_read_struct(&png, &info, NULL);
     if (file != NULL) fclose(file);
@@ -44,7 +44,7 @@ bool kl_texture_loadpng(char* path, kl_texture_t *texture) {
   file = fopen(path, "rb");
   if (file == NULL) {
     fprintf(stderr, "image-png: %s does not exist\n", path);
-    longjmp(png->jmpbuf, 1);
+    longjmp(png_jmpbuf(png), 1);
   }
   png_init_io(png, file);
 
@@ -55,54 +55,50 @@ bool kl_texture_loadpng(char* path, kl_texture_t *texture) {
 
   png_read_update_info(png, info);
 
-  int w = info->width;
-  int h = info->height;
+  int w = png_get_image_width(png, info);
+  int h = png_get_image_height(png, info);
   int format;
   int channels;
-  switch (info->color_type) {
+  switch (png_get_color_type(png, info)) {
     case PNG_COLOR_TYPE_GRAY:
-      format   = KL_RENDER_GRAY;
+      format   = KL_TEXFMT_I;
       channels = 1;
       break;
     case PNG_COLOR_TYPE_GRAY_ALPHA:
-      format   = KL_RENDER_GRAYA;
+      format   = KL_TEXFMT_IA;
       channels = 2;
       break;
     case PNG_COLOR_TYPE_RGB:
-      format   = KL_RENDER_RGB;
+      format   = KL_TEXFMT_RGB;
       channels = 3;
       break;
     case PNG_COLOR_TYPE_RGB_ALPHA:
-      format   = KL_RENDER_RGBA;
+      format   = KL_TEXFMT_RGBA;
       channels = 4;
       break;
     default:
       fprintf(stderr, "image-png: Bad image format for %s\n", path);
       fclose(file);
-      longjmp(png->jmpbuf, 1);
+      longjmp(png_jmpbuf(png), 1);
   }
-  int type;
-  int bytes;
-  if (info->bit_depth > 8) {
-    type  = KL_RENDER_UINT16;
-    bytes = 2;
-  } else {
-    type  = KL_RENDER_UINT8;
-    bytes = 1;
+  if (png_get_bit_depth(png, info) != 8) {
+    fprintf(stderr, "image-png: Unsupported pixel format for %s\n", path);
+    fclose(file);
+    longjmp(png_jmpbuf(png), 1);
   }
   
-  buffer = malloc(w * h * channels * bytes);
+  buffer = malloc(w * h * channels);
 
   png_bytep rows[h];
   for (uint32_t i=0; i < h; i++) {
-    rows[i] = buffer + i * w * channels * bytes;
+    rows[i] = buffer + i * w * channels;
   }
   
   png_read_image(png, rows);
 
   texture->w  = w;
   texture->h  = h;
-  texture->id = kl_render_upload_texture(buffer, w, h, format, type);
+  texture->id = kl_render_upload_texture(buffer, w, h, format, false, true);
 
   png_destroy_read_struct(&png, &info, NULL);
   fclose(file);

@@ -1,12 +1,17 @@
 #ifndef KL_INPUT_H
 #define KL_INPUT_H
 
+#include <stdbool.h>
+
 #define KL_BTN_NONE  0x00
 #define KL_BTN_ESC   0x01
 #define KL_BTN_ENTER 0x02
-#define KL_BTN_SHIFT 0x03
-#define KL_BTN_CTRL  0x04
-#define KL_BTN_ALT   0x05
+#define KL_BTN_LSHIFT 0x04
+#define KL_BTN_RSHIFT 0x05
+#define KL_BTN_LCTRL 0x06
+#define KL_BTN_RCTRL 0x07
+#define KL_BTN_LALT  0x08
+#define KL_BTN_RALT  0x09
 #define KL_BTN_F1    0x10
 #define KL_BTN_F2    0x11
 #define KL_BTN_F3    0x12
@@ -55,6 +60,7 @@
 #define KL_BTN_X     0x47
 #define KL_BTN_Y     0x48
 #define KL_BTN_Z     0x49
+#define KL_BTN_COUNT 0x50
 
 #define KL_EVT_NONE   0x00
 #define KL_EVT_BUTTON 0x01
@@ -66,8 +72,8 @@ typedef struct kl_evt {
 
 typedef struct kl_evt_button {
   kl_evt_t evt;
-  int code;
-  int state;
+  int  code;
+  bool isdown;
 } kl_evt_button_t;
 
 typedef struct kl_evt_mouse {
@@ -86,7 +92,7 @@ typedef union kl_evt_generic {
 
 int kl_input_init();
 void kl_input_tick();
-int kl_input_poll(kl_evt_generic_t *evt);
+bool kl_input_poll(kl_evt_generic_t *evt);
 
 #endif /* KL_INPUT_H */
 /* vim: set ts=2 sw=2 et */

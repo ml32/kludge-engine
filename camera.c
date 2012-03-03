@@ -66,7 +66,10 @@ void kl_camera_update_scene(kl_camera_t *cam, kl_scene_t *scene) {
     },
     .viewpos = cam->position,
     .ray_eye = { ray_eye[0], ray_eye[1], ray_eye[2], ray_eye[3] },
-    .ray_world = { ray_world[0], ray_world[1], ray_world[2], ray_world[3] }
+    .ray_world = { ray_world[0], ray_world[1], ray_world[2], ray_world[3] },
+	.viewport = cam->viewport,
+	.near = cam->near,
+	.far = cam->far
   };
 }
 

@@ -1,5 +1,3 @@
-#define _BSD_SOURCE /* need strsep() */
-
 #include "model-obj.h"
 
 #include "model.h"
@@ -7,8 +5,10 @@
 #include "renderer.h"
 #include "array.h"
 #include "vec.h"
+#include "strsep.h"
 
 #include <stdint.h>
+#include <stdbool.h>
 #include <string.h>
 #include <stdio.h>
 
@@ -76,8 +76,9 @@ static int parsefacevert(char *str, obj_face_vert_t *dst);
 static void gentangent(obj_data_t *objdata, unsigned int idx1, unsigned int idx2, unsigned int idx3);
 
 /* ------------------------ */
-int kl_model_isobj(uint8_t *data, int size) {
-  if (size < 4) return 0;
+bool kl_model_isobj(uint8_t *data, int size) {
+  if (data == NULL) return false;
+  if (size < 4) return false;
   uint32_t magic = *((uint32_t*)data);
   return magic == OBJ_MAGIC;
 }
