@@ -1,7 +1,7 @@
 CC=gcc
 CFLAGS=-std=c99 -g -pg -pedantic -Wall -I/usr/local/include -Iinclude
 LDFLAGS=-L/usr/local/lib -L/usr/lib/nvidia-current -lglfw -lglew32 -lopengl32 -lmingw32 -lpng -lz -lm
-OBJS=main.o input-glfw.o vid-glfw.o platform-glfw.o frame.o terrain.o model.o model-iqm2.o array.o model-obj.o camera.o bvhtree.o renderer.o renderer-gl3.o sphere.o matrix-sw.o quat-sw.o material.o material-mtl.o texture.o texture-png.o resource.o strsep.o
+OBJS=main.o time-glfw.o input-glfw.o vid-glfw.o platform-glfw.o frame.o terrain.o model.o model-iqm2.o array.o model-obj.o camera.o bvhtree.o renderer.o renderer-gl3.o sphere.o matrix-sw.o quat-sw.o material.o material-mtl.o texture.o texture-png.o resource.o strsep.o
 BINARYNAME=test
 
 all: main

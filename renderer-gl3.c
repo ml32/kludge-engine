@@ -57,7 +57,7 @@ static unsigned int gbuffer_tex_specular;
 static unsigned int gbuffer_tex_emissive;
 static unsigned int gbuffer_fbo;
 
-/* used to downsample the g-buffer */
+/* used to downsample the g-buffer for ssao */
 static unsigned int downsample_vshader;
 static unsigned int downsample_fshader;
 static unsigned int downsample_program;
@@ -117,6 +117,7 @@ static unsigned int tonemap_fshader;
 static unsigned int tonemap_vshader;
 static unsigned int tonemap_program;
 static int tonemap_uniform_tcomposite;
+static int tonemap_uniform_sigma; /* half-brightness point */
 
 static unsigned int blit_fshader;
 static unsigned int blit_vshader;
@@ -569,14 +570,50 @@ void kl_gl3_draw_pass_debug(kl_mat4f_t *mvpmatrix, float r, float g, float b) {
   glDrawElements(GL_TRIANGLES, SPHERE_NUMTRIS * 3, GL_UNSIGNED_INT, 0);
 }
 
-void kl_gl3_composite() {
+void kl_gl3_composite(float dt) {
+  static float luminance = 1.0f;
+
+  /* compute geometric mean of luminance */
+  const int level = 4;
+  int w, h;
+  glBindTexture(GL_TEXTURE_2D, tex_lighting);
+  glGenerateMipmap(GL_TEXTURE_2D);
+  glGetTexLevelParameteriv(GL_TEXTURE_2D, level, GL_TEXTURE_WIDTH,  &w);
+  glGetTexLevelParameteriv(GL_TEXTURE_2D, level, GL_TEXTURE_HEIGHT, &h);
+  float *samples = (float*)malloc(w*h*3*sizeof(float));
+  glGetTexImage(GL_TEXTURE_2D, level, GL_RGB, GL_FLOAT, samples);
+  glBindTexture(GL_TEXTURE_2D, 0);
+  
+  float accum = 0.0f;
+  for (int i = 0; i < w * h; i++) {
+    float r = samples[i*3+0];
+    float g = samples[i*3+1];
+    float b = samples[i*3+2];
+    if (isnan(r) || isnan(g) || isnan(b)) continue;
+    float y = 0.299f * r + 0.587f * g + 0.114f * b;
+    accum += log(0.0001 + y);
+  }
+  float mean = exp(accum / (w * h));
+  free(samples);
+  
+  /* determine half-brightness level */
+  const float lambda   = 1.0f; /* rate of decay */
+  const float exposure = 1.0f / 8.0f;
+  float decay = exp(-lambda * dt);
+  luminance = decay * luminance + (1.0f - decay) * mean;
+  float sigma = luminance / exposure;
+  
+  
+  /* draw tonemapped image */
   glEnable(GL_FRAMEBUFFER_SRGB);
 
   glUseProgram(tonemap_program);
 
   glUniform1i(tonemap_uniform_tcomposite, 0);
   glActiveTexture(GL_TEXTURE0);
-  glBindTexture(GL_TEXTURE_RECTANGLE, tex_lighting);
+  glBindTexture(GL_TEXTURE_2D, tex_lighting);
+  
+  glUniform1f(tonemap_uniform_sigma, sigma);
 
   glBindVertexArray(vao_quad);
 
@@ -1111,17 +1148,17 @@ static int init_minimal() {
 
 static int init_lighting(int width, int height) {
   glGenTextures(1, &tex_lighting);
-  glBindTexture(GL_TEXTURE_RECTANGLE, tex_lighting);
-  glTexImage2D(GL_TEXTURE_RECTANGLE, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, NULL);
-  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-  glBindTexture(GL_TEXTURE_RECTANGLE, 0);
+  glBindTexture(GL_TEXTURE_2D, tex_lighting);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, NULL);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glBindTexture(GL_TEXTURE_2D, 0);
 
   glGenFramebuffers(1, &fbo_lighting);
   glBindFramebuffer(GL_FRAMEBUFFER, fbo_lighting);
-  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_RECTANGLE, tex_lighting, 0);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex_lighting, 0);
   glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, rbo_depth);
   int status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
   if (status != GL_FRAMEBUFFER_COMPLETE) {
@@ -1165,6 +1202,7 @@ static int init_tonemap() {
   if (create_program("tonemapping shader program", tonemap_vshader, tonemap_fshader, &tonemap_program) < 0) return -1;
 
   tonemap_uniform_tcomposite = glGetUniformLocation(tonemap_program, "tcomposite");
+  tonemap_uniform_sigma      = glGetUniformLocation(tonemap_program, "sigma");
 
   return 0;
 }

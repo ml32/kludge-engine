@@ -6,6 +6,7 @@
 #include "terrain.h"
 #include "model.h"
 #include "camera.h"
+#include "time.h"
 
 #include <stdio.h>
 #include <math.h>
@@ -47,12 +48,16 @@ int main(int argc, char **argv) {
   kl_vec3f_t envlight_dir = { -2.0f, -2.0f, 1.0f };
   kl_render_set_envlight(&envlight_dir, 0.8f, 0.8f, 1.0f, 0.05f, 1.0f, 0.9f, 0.6f, 0.05f);
   
+  kl_timer_t timer = KL_TIMER_INIT;
+  
   bool move_f = 0;
   bool move_b = 0;
   bool move_l = 0;
   bool move_r = 0;
   kl_vec3f_t mouseangle = { .x = 0.0f, .y = 0.0f, .z = 0.0f };
   for (;;) {
+    float dt = kl_timer_tick(&timer);
+  
     kl_input_tick();
     int dx = 0; int dy = 0;
     while (kl_input_poll(&evt)) {
@@ -98,10 +103,11 @@ int main(int argc, char **argv) {
     kl_camera_local_rotate(&cam, &mouseangle);
     
     kl_vec3f_t offset = {
-      .x = (move_r ? 10.0f : 0.0f) - (move_l ? 10.0f : 0.0f),
+      .x = (move_r ? 1.0f : 0.0f) - (move_l ? 1.0f : 0.0f),
       .y = 0.0f,
-      .z = (move_b ? 10.0f : 0.0f) - (move_f ? 10.0f : 0.0f)
+      .z = (move_b ? 1.0f : 0.0f) - (move_f ? 1.0f : 0.0f)
     };
+    kl_vec3f_scale(&offset, &offset, 320.0f * dt);
     kl_camera_local_move(&cam, &offset);
 
     kl_render_draw(&cam);

@@ -461,17 +461,20 @@ static void gentangent(obj_data_t *objdata, unsigned int idx1, unsigned int idx2
   kl_vec3f_sub(&bitangent_prime, &du1dp2, &du2dp1);
   kl_vec3f_scale(&bitangent_prime, &bitangent_prime, scale);
 
-  kl_vec3f_t tangent, bitangent;
-  kl_vec3f_cross(&tangent, &bitangent_prime, &normal);
+  kl_vec3f_t tangent, tprojn;
+  kl_vec3f_scale(&tprojn, &normal, kl_vec3f_dot(&normal, &tangent_prime));
+  kl_vec3f_sub(&tangent, &tangent_prime, &tprojn);
   kl_vec3f_norm(&tangent, &tangent);
-  kl_vec3f_cross(&bitangent, &normal, &tangent_prime);
-  kl_vec3f_norm(&bitangent, &bitangent);
 
+  kl_vec3f_t nxt;
+  kl_vec3f_cross(&nxt, &normal, &tangent);
+  float handedness = kl_vec3f_dot(&nxt, &bitangent_prime) > 0.0f ? 1.0f : -1.0f;
+  
   kl_vec4f_t final;
   final.x = tangent.x;
   final.y = tangent.y;
   final.z = tangent.z;
-  final.w = 1.0f;
+  final.w = handedness;
 
   kl_array_set(&objdata->buftangent, idx1, &final);
 }

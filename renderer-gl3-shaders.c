@@ -42,7 +42,7 @@ DEF_BLOCK_SCENE
 "  ftexcoord = vtexcoord;\n"
 "\n"
 "  vec3 vbitangent = cross(vnormal, vtangent.xyz) * vtangent.w;\n"
-"  tbnmatrix = viewrot * mat3(normalize(vtangent.xyz), normalize(vbitangent), normalize(vnormal));\n"
+"  tbnmatrix = viewrot * mat3(vtangent.xyz, vbitangent, vnormal);\n"
 "\n"
 "  gl_Position = vpmatrix * vec4(vposition, 1.0);\n"
 "}\n";
@@ -131,7 +131,7 @@ DEF_NORMAL_ENCODING
 "float calc_ao(vec3 offset, vec3 normal) {\n"
 "  vec3  dir  = normalize(offset);\n"
 "  float dist = length(offset);\n"
-"  float falloff = 1.0 / (1.0 + dist * dist / 256.0);\n"
+"  float falloff = 1.0 / (1.0 + dist * dist / 4096.0);\n"
 "  float ao = max(0.0, dot(dir, normal));\n"
 "  return ao * falloff;\n"
 "}\n"
@@ -142,7 +142,7 @@ DEF_NORMAL_ENCODING
 ""
 "  float occlusion = 0.0;\n"
 "  for (int i=0; i < 25; i++) {\n"
-"    vec2  offset = 4.0 * normalize(texture(tnoise, (gl_FragCoord.xy + vec2(1 << (i / 5), 1 << (i % 5))) / 256.0).xyz * 2.0 - 1.0).xy;\n"
+"    vec2  offset = 8.0 * normalize(texture(tnoise, (gl_FragCoord.xy + vec2(1 << (i / 5), 1 << (i % 5))) / 256.0).xyz * 2.0 - 1.0).xy;\n"
 "    float occluder_depth  = texture(tdepth, gl_FragCoord.xy + offset).r;\n"
 "    vec3  occluder_coord  = fray_eye * occluder_depth;\n"
 "    vec3  occluder_offset = occluder_coord - coord;\n" /* offset in eye-space */
@@ -317,13 +317,17 @@ DEF_NORMAL_ENCODING
 static const char *vshader_tonemap_src = 
 "#version 330\n"
 "layout(location = 0) in vec2 vcoord;\n"
+"smooth out vec2 ftexcoord;\n"
 "void main () {\n"
+"  ftexcoord   = (vcoord * 0.5 + 0.5);\n"
 "  gl_Position = vec4(vcoord, 0.0, 1.0);\n"
 "}\n";
 
 static const char *fshader_tonemap_src = 
 "#version 330\n"
-"uniform sampler2DRect tcomposite;\n"
+"uniform sampler2D tcomposite;\n"
+"uniform float sigma;\n"
+"smooth in vec2 ftexcoord;\n"
 "layout(location = 0) out vec4 color;\n"
 "vec3 tonemap(vec3 color, float sigma) {\n"
 "  color     = max(vec3(0.0, 0.0, 0.0), color);\n"
@@ -332,8 +336,8 @@ static const char *fshader_tonemap_src =
 "  return c2/(c2+var);\n"
 "}\n"
 "void main() {\n"
-"  vec3 c = texture(tcomposite, gl_FragCoord.xy).rgb;\n"
-"  color = vec4(tonemap(c, 0.5), 1.0);\n"
+"  vec3 c = texture(tcomposite, ftexcoord).rgb;\n"
+"  color = vec4(tonemap(c, sigma), 1.0);\n"
 "}\n";
 
 static const char *vshader_blit_src =
@@ -343,7 +347,7 @@ static const char *vshader_blit_src =
 "layout(location = 0) in vec2 vcoord;\n"
 "smooth out vec2 ftexcoord;\n"
 "void main () {\n"
-"  ftexcoord  = (vcoord * 0.5 + 0.5);\n"
+"  ftexcoord   = (vcoord * 0.5 + 0.5);\n"
 "  gl_Position = vec4(vcoord * size + offset, 0.0, 1.0);\n"
 "}\n";
 

@@ -5,6 +5,7 @@
 #include "bvhtree.h"
 #include "plane.h"
 #include "sphere.h"
+#include "time.h"
 
 #include <stdlib.h>
 
@@ -50,7 +51,9 @@ void kl_render_draw(kl_camera_t *cam) {
   kl_bvh_debug(bvh_lights, (kl_bvh_debug_cb)&draw_bounds, &scene);
   kl_gl3_end_pass_debug();
 
-  kl_gl3_composite();
+  static kl_timer_t timer = KL_TIMER_INIT;
+  float dt = kl_timer_tick(&timer);
+  kl_gl3_composite(dt);
 
   kl_gl3_debugtex(debugmode);
 }
