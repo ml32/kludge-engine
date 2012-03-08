@@ -24,6 +24,7 @@ typedef struct kl_render_attrib {
 
 int kl_render_init();
 void kl_render_draw(kl_camera_t *cam);
+void kl_render_pointshadow_draw(kl_vec3f_t *center);
 void kl_render_set_debug(int mode);
 void kl_render_add_model(kl_model_t *model);
 void kl_render_add_light(kl_vec3f_t *position, float r, float g, float b, float intensity);

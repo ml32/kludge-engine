@@ -16,7 +16,9 @@ typedef struct light {
 } light_t;
 
 static int checkfrustum(kl_sphere_t *bounds, kl_frustum_t *frustum);
+static int alwaystrue(kl_sphere_t *bounds, void* _);
 static void draw_model(kl_model_t *model, kl_scene_t *scene);
+static void draw_pointshadow_model(kl_model_t *model, void *_);
 static void draw_light(light_t *light, kl_scene_t *scene);
 static void draw_bounds(kl_bvh_node_t *node, kl_scene_t *scene);
 
@@ -56,6 +58,14 @@ void kl_render_draw(kl_camera_t *cam) {
   kl_gl3_composite(dt);
 
   kl_gl3_debugtex(debugmode);
+}
+
+void kl_render_pointshadow_draw(kl_vec3f_t *center) { 
+  for (int i=0; i < 6; i++) {
+    kl_gl3_begin_pass_pointshadow(center, i);
+    kl_bvh_search(bvh_models, (kl_bvh_filter_cb)&alwaystrue, NULL, (kl_bvh_result_cb)&draw_pointshadow_model, NULL);
+    kl_gl3_end_pass_pointshadow();
+  }
 }
 
 void kl_render_set_debug(int mode) {
@@ -124,8 +134,16 @@ static int checkfrustum(kl_sphere_t *bounds, kl_frustum_t *frustum) {
   return 1;
 }
 
+static int alwaystrue(kl_sphere_t *bounds, void* _) {
+  return 1;
+}
+
 static void draw_model(kl_model_t *model, kl_scene_t *scene) {
   kl_gl3_draw_pass_gbuffer(model);
+}
+
+static void draw_pointshadow_model(kl_model_t *model, void *_) {
+  kl_gl3_draw_pass_pointshadow(model);
 }
 
 static void draw_light(light_t *light, kl_scene_t *scene) {
@@ -135,7 +153,7 @@ static void draw_light(light_t *light, kl_scene_t *scene) {
   kl_mat4f_mul(&modelmatrix, &translation, &scale);
   kl_mat4f_mul(&mvpmatrix, &scene->vpmatrix, &modelmatrix);
 
-  kl_gl3_draw_pass_lighting(&mvpmatrix, light->id);
+  kl_gl3_draw_pass_lighting(&mvpmatrix, &light->position, light->id);
 }
 
 static void draw_bounds(kl_bvh_node_t *node, kl_scene_t *scene) {

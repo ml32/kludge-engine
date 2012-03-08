@@ -31,6 +31,67 @@ typedef union kl_mat3f {
   }\
 }
 
+/* these are the rotations used for cubemaps */
+#define KL_MAT4F_POSX \
+{\
+  .cell = {\
+     0.0f,  0.0f, -1.0f,  0.0f,\
+     0.0f, -1.0f,  0.0f,  0.0f,\
+    -1.0f,  0.0f,  0.0f,  0.0f,\
+     0.0f,  0.0f,  0.0f,  1.0f\
+  }\
+}
+
+#define KL_MAT4F_NEGX \
+{\
+  .cell = {\
+     0.0f,  0.0f,  1.0f,  0.0f,\
+     0.0f, -1.0f,  0.0f,  0.0f,\
+     1.0f,  0.0f,  0.0f,  0.0f,\
+     0.0f,  0.0f,  0.0f,  1.0f\
+  }\
+}
+
+#define KL_MAT4F_POSY \
+{\
+  .cell = {\
+     1.0f,  0.0f,  0.0f,  0.0f,\
+     0.0f,  0.0f, -1.0f,  0.0f,\
+     0.0f,  1.0f,  0.0f,  0.0f,\
+     0.0f,  0.0f,  0.0f,  1.0f\
+  }\
+}
+
+#define KL_MAT4F_NEGY \
+{\
+  .cell = {\
+     1.0f,  0.0f,  0.0f,  0.0f,\
+     0.0f,  0.0f,  1.0f,  0.0f,\
+     0.0f, -1.0f,  0.0f,  0.0f,\
+     0.0f,  0.0f,  0.0f,  1.0f\
+  }\
+}
+
+#define KL_MAT4F_POSZ \
+{\
+  .cell = {\
+     1.0f,  0.0f,  0.0f,  0.0f,\
+     0.0f, -1.0f,  0.0f,  0.0f,\
+     0.0f,  0.0f, -1.0f,  0.0f,\
+     0.0f,  0.0f,  0.0f,  1.0f\
+  }\
+}
+
+#define KL_MAT4F_NEGZ \
+{\
+  .cell = {\
+    -1.0f,  0.0f,  0.0f,  0.0f,\
+     0.0f, -1.0f,  0.0f,  0.0f,\
+     0.0f,  0.0f,  1.0f,  0.0f,\
+     0.0f,  0.0f,  0.0f,  1.0f\
+  }\
+}
+
 void kl_mat4f_mul(kl_mat4f_t *dst, kl_mat4f_t *s1, kl_mat4f_t *s2);
 void kl_mat4f_ortho(kl_mat4f_t *dst, float l, float r, float b, float t, float n, float f);
 void kl_mat4f_frustum(kl_mat4f_t *dst, float l, float r, float b, float t, float n, float f);

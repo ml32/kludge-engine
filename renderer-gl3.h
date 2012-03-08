@@ -16,7 +16,11 @@ void kl_gl3_draw_pass_gbuffer(kl_model_t *model);
 
 void kl_gl3_begin_pass_lighting();
 void kl_gl3_end_pass_lighting();
-void kl_gl3_draw_pass_lighting(kl_mat4f_t *mvpmatrix, unsigned int light);
+void kl_gl3_draw_pass_lighting(kl_mat4f_t *mvpmatrix, kl_vec3f_t *center, unsigned int light);
+
+void kl_gl3_begin_pass_pointshadow(kl_vec3f_t *center, int face);
+void kl_gl3_end_pass_pointshadow();
+void kl_gl3_draw_pass_pointshadow(kl_model_t *model);
 
 /* displays bounding volumes */
 void kl_gl3_begin_pass_debug();

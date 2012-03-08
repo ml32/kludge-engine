@@ -82,8 +82,6 @@ int kl_resource_add_entry(char *path, char *vpath) {
 }
 
 static int listdir(char *path, kl_array_t *items) {
-  printf("%s\n", path);
-    
   DIR *dir = opendir(path);
   if (dir == NULL) {
     fprintf(stderr, "Resource Manager: Failed to read directory %s!\n\tDetails: %s\n", path, strerror(errno));
@@ -96,13 +94,11 @@ static int listdir(char *path, kl_array_t *items) {
   struct stat    s;
   diritem_t      item;
   while ((ent = readdir(dir)) != NULL) {
-    printf("\t%s\n", ent->d_name);
     char fullpath[KL_RESITEM_PATHLEN];
     snprintf(fullpath, KL_RESITEM_PATHLEN, "%s/%s", path, ent->d_name);
     fullpath[KL_RESITEM_PATHLEN-1] = '\0';
     
     stat(fullpath, &s);
-    printf("%s, %x\n", fullpath, s.st_mode);
     if (S_ISDIR(s.st_mode)) {
       if (strcmp(ent->d_name, "..") == 0) continue;
       if (strcmp(ent->d_name, ".") == 0) continue;

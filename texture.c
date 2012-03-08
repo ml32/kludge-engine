@@ -36,8 +36,6 @@ kl_texture_t *kl_texture_incref(char *path) {
     kl_resource_id_t resid = kl_resource_getid(buf);
     texture = kl_resource_incref(loader, resid);
   }
-  kl_resource_printall();
-  printf("%s, %s, %016llx\n", path, buf, resid);
 
   return texture;
 }
@@ -51,7 +49,6 @@ void kl_texture_decref(kl_texture_t *texture) {
 static kl_texture_t *texture_load(char *path, char *vpath) {
   kl_texture_t *texture = malloc(sizeof(kl_texture_t));
 
-  printf("%s\n", vpath);
   if (strcmp(vpath, "DEFAULT_DIFFUSE") == 0) {
     texture_load_default_diffuse(path, texture);
     return texture;
