@@ -9,18 +9,8 @@
 
 #include <stdlib.h>
 
-typedef struct light {
-  kl_vec3f_t position;
-  float      scale;
-  unsigned int id;
-} light_t;
-
 static int checkfrustum(kl_sphere_t *bounds, kl_frustum_t *frustum);
 static int alwaystrue(kl_sphere_t *bounds, void* _);
-static void draw_model(kl_model_t *model, kl_scene_t *scene);
-static void draw_pointshadow_model(kl_model_t *model, void *_);
-static void draw_light(light_t *light, kl_scene_t *scene);
-static void draw_bounds(kl_bvh_node_t *node, kl_scene_t *scene);
 
 static kl_bvh_node_t *bvh_models = NULL;
 static kl_bvh_node_t *bvh_lights = NULL;
@@ -40,19 +30,27 @@ void kl_render_draw(kl_camera_t *cam) {
 
   kl_gl3_update_scene(&scene);
 
-  kl_gl3_begin_pass_gbuffer();
-  kl_bvh_search(bvh_models, (kl_bvh_filter_cb)&checkfrustum, &frustum, (kl_bvh_result_cb)&draw_model, &scene);
-  kl_gl3_end_pass_gbuffer();
+  kl_array_t models;
+  kl_array_init(&models, sizeof(kl_model_t*));
+  kl_bvh_search(bvh_models, (kl_bvh_filter_cb)&checkfrustum, &frustum, &models);
+  kl_gl3_pass_gbuffer(&models);
+  kl_array_free(&models);
 
-  kl_gl3_begin_pass_lighting();
-  kl_bvh_search(bvh_lights, (kl_bvh_filter_cb)&checkfrustum, &frustum, (kl_bvh_result_cb)&draw_light, &scene);
-  kl_gl3_end_pass_lighting();
+  kl_gl3_pass_envlight();
+  
+  kl_array_t lights;
+  kl_array_init(&lights, sizeof(kl_light_t*));
+  kl_bvh_search(bvh_lights, (kl_bvh_filter_cb)&checkfrustum, &frustum, &lights);
+  kl_gl3_pass_pointlight(&lights);
+  kl_array_free(&lights);
 
+  /*
   kl_gl3_begin_pass_debug();
   kl_bvh_debug(bvh_models, (kl_bvh_debug_cb)&draw_bounds, &scene);
   kl_bvh_debug(bvh_lights, (kl_bvh_debug_cb)&draw_bounds, &scene);
   kl_gl3_end_pass_debug();
-
+  */
+  
   static kl_timer_t timer = KL_TIMER_INIT;
   float dt = kl_timer_tick(&timer);
   kl_gl3_composite(dt);
@@ -60,12 +58,8 @@ void kl_render_draw(kl_camera_t *cam) {
   kl_gl3_debugtex(debugmode);
 }
 
-void kl_render_pointshadow_draw(kl_vec3f_t *center) { 
-  for (int i=0; i < 6; i++) {
-    kl_gl3_begin_pass_pointshadow(center, i);
-    kl_bvh_search(bvh_models, (kl_bvh_filter_cb)&alwaystrue, NULL, (kl_bvh_result_cb)&draw_pointshadow_model, NULL);
-    kl_gl3_end_pass_pointshadow();
-  }
+void kl_render_query_models(kl_array_t *result) {
+  kl_bvh_search(bvh_models, (kl_bvh_filter_cb)&alwaystrue, NULL, result);
 }
 
 void kl_render_set_debug(int mode) {
@@ -84,8 +78,8 @@ void kl_render_add_light(kl_vec3f_t *position, float r, float g, float b, float 
   /* 16 * sqrt(intensity) is the distance at which light contribution is less than 1/256 */
   float radius = 16.0f * sqrtf(intensity);
 
-  light_t *light = malloc(sizeof(light_t));
-  *light = (light_t){
+  kl_light_t *light = malloc(sizeof(kl_light_t));
+  *light = (kl_light_t){
     .position = *position,
     .scale    = radius, 
     .id       = kl_gl3_upload_light(position, r, g, b, intensity)
@@ -136,24 +130,6 @@ static int checkfrustum(kl_sphere_t *bounds, kl_frustum_t *frustum) {
 
 static int alwaystrue(kl_sphere_t *bounds, void* _) {
   return 1;
-}
-
-static void draw_model(kl_model_t *model, kl_scene_t *scene) {
-  kl_gl3_draw_pass_gbuffer(model);
-}
-
-static void draw_pointshadow_model(kl_model_t *model, void *_) {
-  kl_gl3_draw_pass_pointshadow(model);
-}
-
-static void draw_light(light_t *light, kl_scene_t *scene) {
-  kl_mat4f_t scale, translation, modelmatrix, mvpmatrix;
-  kl_mat4f_translation(&translation, &light->position);
-  kl_mat4f_scale(&scale, light->scale, light->scale, light->scale);
-  kl_mat4f_mul(&modelmatrix, &translation, &scale);
-  kl_mat4f_mul(&mvpmatrix, &scene->vpmatrix, &modelmatrix);
-
-  kl_gl3_draw_pass_lighting(&mvpmatrix, &light->position, light->id);
 }
 
 static void draw_bounds(kl_bvh_node_t *node, kl_scene_t *scene) {

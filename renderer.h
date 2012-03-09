@@ -6,6 +6,7 @@
 #include "matrix.h"
 #include "model.h"
 #include "camera.h"
+#include "array.h"
 
 #define KL_RENDER_CW     0x20
 #define KL_RENDER_CCW    0x21
@@ -21,10 +22,16 @@ typedef struct kl_render_attrib {
   unsigned int buffer;
 } kl_render_attrib_t;
 
+typedef struct kl_light {
+  kl_vec3f_t position;
+  float      scale;
+  unsigned int id;
+} kl_light_t;
+
 
 int kl_render_init();
 void kl_render_draw(kl_camera_t *cam);
-void kl_render_pointshadow_draw(kl_vec3f_t *center);
+void kl_render_query_models(kl_array_t *result); /* TODO: add culling/filtering */
 void kl_render_set_debug(int mode);
 void kl_render_add_model(kl_model_t *model);
 void kl_render_add_light(kl_vec3f_t *position, float r, float g, float b, float intensity);

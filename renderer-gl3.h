@@ -7,25 +7,22 @@
 
 #include "camera.h"
 #include "model.h"
+#include "array.h"
 
 int kl_gl3_init();
 
-void kl_gl3_begin_pass_gbuffer();
-void kl_gl3_end_pass_gbuffer();
-void kl_gl3_draw_pass_gbuffer(kl_model_t *model);
+void kl_gl3_pass_gbuffer(kl_array_t *models);
 
-void kl_gl3_begin_pass_lighting();
-void kl_gl3_end_pass_lighting();
-void kl_gl3_draw_pass_lighting(kl_mat4f_t *mvpmatrix, kl_vec3f_t *center, unsigned int light);
+void kl_gl3_pass_envlight();
+void kl_gl3_pass_pointlight(kl_array_t *models);
 
-void kl_gl3_begin_pass_pointshadow(kl_vec3f_t *center, int face);
-void kl_gl3_end_pass_pointshadow();
-void kl_gl3_draw_pass_pointshadow(kl_model_t *model);
+void kl_gl3_pass_pointshadow(kl_vec3f_t *center);
+void kl_gl3_pass_pointshadow_face(int face, kl_array_t *models);
 
 /* displays bounding volumes */
 void kl_gl3_begin_pass_debug();
 void kl_gl3_end_pass_debug();
-void kl_gl3_draw_pass_debug(kl_mat4f_t *mvpmatrix, float r, float g, float b);
+void kl_gl3_draw_pass_debug(kl_mat4f_t *modelmatrix, float r, float g, float b);
 
 void kl_gl3_composite(float dt); /* apply tonemapping, postprocessing, and output to screen */
 void kl_gl3_debugtex(int mode); /* show output of various buffers */

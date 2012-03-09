@@ -8,6 +8,8 @@
 "  uniform mat4 vpmatrix;\n"\
 "  uniform vec3 viewpos;\n"\
 "  uniform mat3 viewrot;\n"\
+"  uniform vec4 ray_eye[4];\n"\
+"  uniform vec4 ray_world[4];\n"\
 "  uniform vec4 viewport;\n"\
 "  uniform float near;\n"\
 "  uniform float far;\n"\
@@ -37,11 +39,9 @@ DEF_BLOCK_SCENE
 "smooth out float fdepth;\n"
 "smooth out vec2 ftexcoord;\n"
 "smooth out mat3 tbnmatrix;\n"
-"smooth out vec3 fnormal;\n" /* debug normal */
 "void main() {\n"
 "  fdepth    = -(viewmatrix * vec4(vposition, 1.0)).z;\n"
 "  ftexcoord = vtexcoord;\n"
-"  fnormal   = vnormal;\n"
 "\n"
 "  vec3 vbitangent = cross(vnormal, vtangent.xyz) * vtangent.w;\n"
 "  tbnmatrix = viewrot * mat3(vtangent.xyz, vbitangent, vnormal);\n"
@@ -59,7 +59,6 @@ DEF_BLOCK_SCENE
 "smooth in float fdepth;\n"
 "smooth in vec2  ftexcoord;\n"
 "smooth in mat3  tbnmatrix;\n"
-"smooth in vec3 fnormal;\n" /* debug normal */
 "layout(location = 0) out float gdepth;\n"
 "layout(location = 1) out vec2  gnormal;\n"
 "layout(location = 2) out vec4  gdiffuse;\n"
@@ -70,9 +69,8 @@ DEF_NORMAL_ENCODING
 "  vec4 diffuse = texture(tdiffuse, ftexcoord);\n"
 "  if (diffuse.a < 0.5) discard;\n"
 "\n"
-//"  vec3 n_tangent = texture(tnormal, ftexcoord).xyz * 2.0 - 1.0;\n"
-//"  vec3 n_eye = normalize(tbnmatrix * n_local);\n"
-"  vec3 n_eye = viewrot * fnormal;\n"
+"  vec3 n_tangent = texture(tnormal, ftexcoord).xyz * 2.0 - 1.0;\n"
+"  vec3 n_eye = normalize(tbnmatrix * n_tangent);\n"
 "\n"
 "  gdepth    = fdepth;\n"
 "  gdiffuse  = diffuse;\n"
@@ -80,6 +78,32 @@ DEF_NORMAL_ENCODING
 "  vec4 spec = texture(tspecular, ftexcoord);\n"
 "  gspecular = vec4(spec.r, spec.a, 0.25, 0.0);\n"
 "  gemissive = texture(temissive, ftexcoord);\n"
+"}\n";
+
+static const char *vshader_gbufferback_src =
+"#version 330\n"
+DEF_BLOCK_SCENE
+"layout(location = 0) in vec3 vposition;\n"
+"layout(location = 1) in vec2 vtexcoord;\n"
+"layout(location = 2) in vec3 vnormal;\n"
+"layout(location = 3) in vec4 vtangent;\n"
+"smooth out float fdepth;\n"
+"smooth out vec2 ftexcoord;\n"
+"void main() {\n"
+"  ftexcoord = vtexcoord;\n"
+"  fdepth    = -(viewmatrix * vec4(vposition, 1.0)).z;\n"
+"  gl_Position = vpmatrix * vec4(vposition, 1.0);\n"
+"}\n";
+
+static const char *fshader_gbufferback_src =
+"#version 330\n"
+"uniform sampler2D tdiffuse;\n"
+"smooth in float fdepth;\n"
+"smooth in vec2  ftexcoord;\n"
+"layout(location = 0) out float gback;\n"
+"void main() {\n"
+"  if (texture(tdiffuse, ftexcoord).a < 0.5) discard;\n"
+"  gback = fdepth;\n"
 "}\n";
 
 static const char *vshader_downsample_src =
@@ -92,26 +116,24 @@ static const char *vshader_downsample_src =
 static const char *fshader_downsample_src =
 "#version 330\n"
 "uniform sampler2DRect tdepth;\n"
-"uniform sampler2DRect tnormal;\n"
+"uniform sampler2DRect tback;\n"
 "layout(location = 0) out float gdepth;\n"
-"layout(location = 1) out vec2  gnormal;\n"
-DEF_NORMAL_ENCODING
+"layout(location = 1) out float gback;\n"
+"vec2 coord[] = vec2[](\n"
+"  gl_FragCoord.xy * 2.0 + vec2(-0.5, -0.5),\n"
+"  gl_FragCoord.xy * 2.0 + vec2( 0.5, -0.5),\n"
+"  gl_FragCoord.xy * 2.0 + vec2(-0.5,  0.5),\n"
+"  gl_FragCoord.xy * 2.0 + vec2( 0.5,  0.5)\n"
+");\n"
 "void main() {\n"
-"  vec2 coord[4] = vec2[](\n"
-"    gl_FragCoord.xy * 2.0 + vec2(-0.5, -0.5),\n"
-"    gl_FragCoord.xy * 2.0 + vec2( 0.5, -0.5),\n"
-"    gl_FragCoord.xy * 2.0 + vec2(-0.5,  0.5),\n"
-"    gl_FragCoord.xy * 2.0 + vec2( 0.5,  0.5)\n"
-"  );\n"
-"  float depth  = 0.0;\n"
-"  vec3  normal = vec3(0.0, 0.0, 0.0);\n"
+"  float depth_front = 0.0;\n"
+"  float depth_back  = 0.0;\n"
 "  for (int i=0; i < 4; i++) {\n"
-"    depth += texture(tdepth, coord[i]).r;\n"
-"    vec3 n = decode_normal(texture(tnormal, coord[i]).rg);\n"
-"    normal += n;\n"
+"    depth_front += texture(tdepth, coord[i]).r;\n"
+"    depth_back  += texture(tback,  coord[i]).r;\n"
 "  }\n"
-"  gdepth  = depth / 4.0;\n"
-"  gnormal = encode_normal(normalize(normal));\n"
+"  gdepth = depth_front / 4.0;\n"
+"  gback  = depth_back  / 4.0;\n"
 "}\n";
 
 static const char *vshader_ssao_src = 
@@ -129,75 +151,91 @@ static const char *fshader_ssao_src =
 "#version 330\n"
 DEF_BLOCK_SCENE
 "uniform sampler2DRect tdepth;\n"
-"uniform sampler2DRect tnormal;\n"
+"uniform sampler2DRect tback;\n"
 "uniform sampler2D tnoise;\n"
 "smooth in vec3 fray_eye;\n"
 "layout(location = 0) out float ssao;\n"
 DEF_NORMAL_ENCODING
-"float calc_ao(vec3 offset, vec3 normal) {\n"
+"float calc_ao(vec3 offset, vec3 normal, float sigma) {\n"
 "  vec3  dir  = normalize(offset);\n"
 "  float dist = length(offset);\n"
-"  float falloff = 1.0 / (1.0 + dist * dist / 4096.0);\n"
-"  float ao = max(0.0, dot(dir, normal));\n"
+"  float costheta = dot(dir, normal);\n"
+"  float falloff = 1.0 / (1.0 + dist / sigma);\n"
+"  float ao = max(0.0, costheta);\n"
 "  return ao * falloff;\n"
 "}\n"
 "void main() {\n"
 "  float depth  = texture(tdepth, gl_FragCoord.xy).r;\n"
-"  vec3  coord  = fray_eye * depth;\n"
-"  vec3  normal = decode_normal(texture(tnormal, gl_FragCoord.xy).rg);\n"
+"  vec3 coord  = fray_eye * depth;\n"
+"  vec3 tangent = dFdx(coord);\n"
+"  vec3 bitangent = dFdy(coord);\n"
+"  vec3 normal = normalize(cross(tangent, bitangent));\n"
 ""
 "  float occlusion = 0.0;\n"
-"  for (int i=0; i < 25; i++) {\n"
-"    vec2  offset = 2.0 * normalize(texture(tnoise, (gl_FragCoord.xy + vec2(1 << (i / 5), 1 << (i % 5))) / 256.0).xy * 2.0 - 1.0).xy;\n"
-"    float occluder_depth  = texture(tdepth, gl_FragCoord.xy + offset).r;\n"
-"    vec3  occluder_coord  = fray_eye * occluder_depth;\n"
-"    vec3  occluder_offset = occluder_coord - coord;\n" /* offset in eye-space */
-"    occlusion += calc_ao(occluder_offset, normal);\n"
+"  for (int i=0; i < 16; i++) {\n"
+"    vec2  offset = 4.0 * normalize(texture(tnoise, (gl_FragCoord.xy + vec2(1 << (i / 4), 1 << (i % 4))) / 256.0).xyz * 2.0 - 1.0).xy;\n"
+"    vec2  occluder_texcoord = gl_FragCoord.xy + offset;\n"
+"    float occluder_fdepth = texture(tdepth, occluder_texcoord).r;\n"
+"    float occluder_bdepth = texture(tback, occluder_texcoord).r;\n"
+"    vec3  occluder_ray    = mix(\n"
+"      mix(ray_eye[0].xyz, ray_eye[1].xyz, occluder_texcoord.x / viewport.z),\n"
+"      mix(ray_eye[3].xyz, ray_eye[2].xyz, occluder_texcoord.x / viewport.z),\n"
+"      occluder_texcoord.y / viewport.w);\n"
+"    vec3 occluder_fcoord = occluder_fdepth * occluder_ray;\n"
+"    vec3 occluder_bcoord = occluder_bdepth * occluder_ray;\n"
+"    vec3 occluder_foffset = occluder_fcoord - coord;\n"
+"    vec3 occluder_boffset = occluder_bcoord - coord;\n"
+"    occlusion += calc_ao(occluder_foffset, normal, 16.0);\n"
+"    occlusion += calc_ao(occluder_boffset, normal, 16.0);\n"
 "  };\n"
-"  ssao = occlusion / (25.0 * 6.0);\n"
+"  ssao = occlusion / 32.0;\n"
 "}\n";
 
-static const char *vshader_upsample_src =
+static const char *vshader_bilateral_src = 
 "#version 330\n"
 "layout(location = 0) in vec2 vcoord;\n"
 "void main () {\n"
 "  gl_Position = vec4(vcoord, 0.0, 1.0);\n"
 "}\n";
 
-static const char *fshader_upsample_src =
+static const char *fshader_bilateral_src =
 "#version 330\n"
-"uniform sampler2DRect tdepth;\n"
-"uniform sampler2DRect tnormal;\n"
-"uniform sampler2DRect tsdepth;\n"
-"uniform sampler2DRect tsnormal;\n"
-"uniform sampler2DRect tocclusion;\n"
-"layout(location = 0) out float ssao;\n"
-DEF_NORMAL_ENCODING
+"uniform sampler2DRect thdepth;\n" /* high-rez depth */
+"uniform sampler2DRect tldepth;\n" /* low-rez depth */
+"uniform sampler2DRect timage;\n"
+"layout(location = 0) out vec4 color;\n"
+"float weight[] = float[](\n"
+"  1.0, 2.0, 1.0,\n"
+"  2.0, 4.0, 2.0,\n"
+"  1.0, 2.0, 1.0\n"
+");\n"
+"vec2 offset[] = vec2[](\n"
+"  vec2(-1, -1), vec2( 0, -1), vec2( 1, -1),\n"
+"  vec2(-1,  0), vec2( 0,  0), vec2( 1,  0),\n"
+"  vec2(-1,  1), vec2( 0,  1), vec2( 1,  1)\n"
+");\n"
 "void main() {\n"
-"  float depth = texture(tdepth, gl_FragCoord.xy).r;\n"
-"  vec3 normal = decode_normal(texture(tnormal, gl_FragCoord.xy).rg);\n"
+"  vec2  ratio = textureSize(thdepth) / textureSize(tldepth);\n"
+"  float depth = texture(thdepth, gl_FragCoord.xy).r;\n"
 "  float total = 0.0;\n"
-"  float value = 0.0;\n"
-"  for (int i=0; i < 4; i++) {\n"
-"      vec2 offset   = vec2((i/2) - 0.5, (i%2) - 0.5);\n"
-"      vec2 texcoord = gl_FragCoord.xy / 2.0 + offset;\n"
-"      float sample_depth = texture(tsdepth, texcoord).r;\n"
-"      vec3 sample_normal = decode_normal(texture(tsnormal, texcoord).rg);\n"
-"      float depthweight = abs(sample_depth - depth) > 16.0 ? 0.0 : 1.0;\n"
-"      float normweight  = pow(max(0.0, dot(normal, sample_normal)), 2.0);\n"
-"      float scale = depthweight * normweight;\n"
-"      value += scale * texture(tocclusion, texcoord).r;\n"
-"      total += scale;\n"
+"  vec4  value = vec4(0.0, 0.0, 0.0, 0.0);\n"
+"  for (int i=0; i < 9; i++) {\n"
+"      vec2 texcoord = gl_FragCoord.xy / ratio + offset[i];\n"
+"      float sample_depth = texture(tldepth, texcoord).r;\n"
+"      float scale = abs(sample_depth - depth) > 16.0 ? 0.0 : 1.0;\n"
+"      value += scale * weight[i] * texture(timage, texcoord);\n"
+"      total += scale * weight[i];\n"
 "  }\n"
-"  ssao = total < 0.01 ? 0.0 : value / total;\n"
+"  color = total < 0.01 ? vec4(0.0, 0.0, 0.0, 0.0) : value / total;\n"
 "}\n";
 
 static const char *vshader_minimal_src = 
 "#version 330\n"
-"uniform mat4 mvpmatrix;\n"
+DEF_BLOCK_SCENE
+"uniform mat4 modelmatrix;\n"
 "layout(location = 0) in vec3 vcoord;\n"
 "void main () {\n"
-"  gl_Position  = mvpmatrix * vec4(vcoord, 1.0);\n"
+"  gl_Position  = vpmatrix * modelmatrix * vec4(vcoord, 1.0);\n"
 "}\n";
 
 static const char *fshader_flatcolor_src = 
@@ -324,8 +362,7 @@ DEF_NORMAL_ENCODING
 ""
 "  vec3 N = decode_normal(texture(tnormal, gl_FragCoord.xy).xy);\n"
 ""
-"  float occlusion = 1.0f;\n"
-//"  float occlusion = pow(1.0 - max(0.0, texture(tocclusion, gl_FragCoord.xy).r), 2.0);\n"
+"  float occlusion = pow(1.0 - max(0.0, texture(tocclusion, gl_FragCoord.xy).r), 2.0);\n"
 ""
 "  vec3 L = normalize(viewrot * -light.direction.xyz);\n"
 "  vec3 V = -normalize(fray_eye);\n"

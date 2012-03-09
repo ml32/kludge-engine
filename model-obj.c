@@ -57,7 +57,7 @@ typedef struct obj_data {
   /* maps from separate position/normal/texcoord indices to combined vertex data: */
   kl_array_t indexmap;
   /* vertex data to be loaded into renderer */
-  kl_array_t bufposition, bufnormal, buftangent, buftexcoord;
+  kl_array_t bufposition, bufnormal, buftangent, bufbitangent, buftexcoord;
   kl_array_t tris, meshes;
 } obj_data_t;
 
@@ -73,7 +73,8 @@ static int parsenormal(obj_data_t *objdata, char *line);
 static int parsetexcoord(obj_data_t *objdata, char *line);
 static int parseface(obj_data_t *objdata, char *line);
 static int parsefacevert(char *str, obj_face_vert_t *dst);
-static void gentangent(obj_data_t *objdata, unsigned int idx1, unsigned int idx2, unsigned int idx3);
+static void updatetangent(obj_data_t *objdata, unsigned int idx1, unsigned int idx2, unsigned int idx3);
+static void orthogonalize(obj_data_t *objdata, unsigned int idx);
 
 /* ------------------------ */
 bool kl_model_isobj(uint8_t *data, int size) {
@@ -116,9 +117,12 @@ kl_model_t* kl_model_loadobj(uint8_t *data, int size) {
   for (int i=0; i < kl_array_size(&objdata.tris); i++) {
     triangle_t tri;
     kl_array_get(&objdata.tris, i, &tri);
-    gentangent(&objdata, tri.vert[0], tri.vert[1], tri.vert[2]);
-    gentangent(&objdata, tri.vert[1], tri.vert[2], tri.vert[0]);
-    gentangent(&objdata, tri.vert[2], tri.vert[0], tri.vert[1]);
+    updatetangent(&objdata, tri.vert[0], tri.vert[1], tri.vert[2]);
+    updatetangent(&objdata, tri.vert[1], tri.vert[2], tri.vert[0]);
+    updatetangent(&objdata, tri.vert[2], tri.vert[0], tri.vert[1]);
+  }
+  for (int i=0; i < kl_array_size(&objdata.buftangent); i++) {
+    orthogonalize(&objdata, i);
   }
 
   printf("verts: %d\nnorms: %d\ntexcoords: %d\nmeshes: %d\n",
@@ -219,6 +223,7 @@ static void objdata_init(obj_data_t *data) {
   kl_array_init(&data->bufposition, sizeof(kl_vec3f_t));
   kl_array_init(&data->bufnormal,   sizeof(kl_vec3f_t));
   kl_array_init(&data->buftangent,  sizeof(kl_vec4f_t));
+  kl_array_init(&data->bufbitangent, sizeof(kl_vec3f_t));
   kl_array_init(&data->buftexcoord, sizeof(kl_vec2f_t));
   kl_array_init(&data->tris,        sizeof(triangle_t));
   kl_array_init(&data->meshes,      sizeof(obj_mesh_t));
@@ -233,6 +238,7 @@ static void objdata_free(obj_data_t *data) {
   kl_array_free(&data->bufposition);
   kl_array_free(&data->bufnormal);
   kl_array_free(&data->buftangent);
+  kl_array_free(&data->bufbitangent);
   kl_array_free(&data->buftexcoord);
   kl_array_free(&data->tris);
 }
@@ -256,7 +262,8 @@ static int objdata_getvertidx(obj_data_t *objdata, obj_face_vert_t *vert) {
 
   kl_vec3f_t position;
   kl_vec3f_t normal;
-  kl_vec4f_t tangent = { .x = 0.0f, .y = 0.0f, .z = 0.0f, .w = 1.0f };
+  kl_vec4f_t tangent   = { .x = 0.0f, .y = 0.0f, .z = 0.0f, .w = 0.0f };
+  kl_vec3f_t bitangent = { .x = 0.0f, .y = 0.0f, .z = 0.0f };
   kl_vec2f_t texcoord;
 
   kl_array_get(&objdata->rawposition, vert->posidx,  &position);
@@ -279,6 +286,7 @@ static int objdata_getvertidx(obj_data_t *objdata, obj_face_vert_t *vert) {
   int vertidx = kl_array_push(&objdata->bufposition, &position);
   kl_array_set_expand(&objdata->bufnormal,   vertidx, &normal,   0);
   kl_array_set_expand(&objdata->buftangent,  vertidx, &tangent,  0);
+  kl_array_set_expand(&objdata->bufbitangent, vertidx, &bitangent, 0);
   kl_array_set_expand(&objdata->buftexcoord, vertidx, &texcoord, 0);
 
   int i = map.n++;
@@ -426,7 +434,7 @@ static int parsefacevert(char *str, obj_face_vert_t *dst) {
 
   return -1;
 }
-static void gentangent(obj_data_t *objdata, unsigned int idx1, unsigned int idx2, unsigned int idx3) {
+static void updatetangent(obj_data_t *objdata, unsigned int idx1, unsigned int idx2, unsigned int idx3) {
   kl_vec3f_t p0, p1, p2;
   kl_array_get(&objdata->bufposition, idx1, &p0);
   kl_array_get(&objdata->bufposition, idx2, &p1);
@@ -455,28 +463,54 @@ static void gentangent(obj_data_t *objdata, unsigned int idx1, unsigned int idx2
   kl_vec3f_scale(&du1dp2, &dp2, du1);
   kl_vec3f_scale(&du2dp1, &dp1, du2);
 
-  kl_vec3f_t tangent_prime, bitangent_prime;
-  kl_vec3f_sub(&tangent_prime, &dv2dp1, &dv1dp2);
-  kl_vec3f_scale(&tangent_prime, &tangent_prime, scale);
-  kl_vec3f_sub(&bitangent_prime, &du1dp2, &du2dp1);
-  kl_vec3f_scale(&bitangent_prime, &bitangent_prime, scale);
+  kl_vec3f_t tangent, bitangent;
+  kl_vec3f_sub(&tangent, &du1dp2, &du2dp1);
+  kl_vec3f_scale(&tangent, &tangent, scale);
+  kl_vec3f_sub(&bitangent, &dv2dp1, &dv1dp2);
+  kl_vec3f_scale(&bitangent, &bitangent, scale);
 
-  kl_vec3f_t tangent, tprojn;
-  kl_vec3f_scale(&tprojn, &normal, kl_vec3f_dot(&normal, &tangent_prime));
-  kl_vec3f_sub(&tangent, &tangent_prime, &tprojn);
+  kl_vec4f_t avgtan;
+  kl_vec3f_t avgbitan;
+  kl_array_get(&objdata->buftangent, idx1, &avgtan);
+  kl_array_get(&objdata->bufbitangent, idx1, &avgbitan);
+  avgtan.x += tangent.x;
+  avgtan.y += tangent.y;
+  avgtan.z += tangent.z;
+  avgbitan.x += bitangent.x;
+  avgbitan.y += bitangent.y;
+  avgbitan.z += bitangent.z;
+  kl_array_set(&objdata->buftangent, idx1, &avgtan);
+  kl_array_set(&objdata->bufbitangent, idx1, &avgbitan);
+}
+
+static void orthogonalize(obj_data_t *objdata, unsigned int idx) {
+  kl_vec3f_t tangent, bitangent, normal;
+  kl_vec4f_t temp;
+  kl_array_get(&objdata->buftangent, idx, &temp);
+  kl_array_get(&objdata->bufbitangent, idx, &bitangent);
+  kl_array_get(&objdata->bufnormal, idx, &normal);
+  tangent.x = temp.x;
+  tangent.y = temp.y;
+  tangent.z = temp.z;
+  
+  kl_vec3f_t tprojn;
+  kl_vec3f_scale(&tprojn, &normal, kl_vec3f_dot(&normal, &tangent));
+  kl_vec3f_sub(&tangent, &tangent, &tprojn);
   kl_vec3f_norm(&tangent, &tangent);
 
   kl_vec3f_t nxt;
   kl_vec3f_cross(&nxt, &normal, &tangent);
-  float handedness = kl_vec3f_dot(&nxt, &bitangent_prime) > 0.0f ? 1.0f : -1.0f;
+  float handedness = kl_vec3f_dot(&nxt, &bitangent) > 0.0f ? 1.0f : -1.0f;
   
-  kl_vec4f_t final;
-  final.x = tangent.x;
-  final.y = tangent.y;
-  final.z = tangent.z;
-  final.w = handedness;
+  temp.x = tangent.x;
+  temp.y = tangent.y;
+  temp.z = tangent.z;
+  temp.w = handedness;
+  
+  kl_vec3f_norm(&bitangent, &bitangent);
 
-  kl_array_set(&objdata->buftangent, idx1, &final);
+  kl_array_set(&objdata->buftangent, idx, &temp);
+  kl_array_set(&objdata->bufbitangent, idx, &bitangent);
 }
 
 /* vim: set ts=2 sw=2 et */

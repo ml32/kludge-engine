@@ -2,6 +2,7 @@
 #define KL_BVHTREE_H
 
 #include "sphere.h"
+#include "array.h"
 
 #define KL_BVH_LEAF   0x01
 #define KL_BVH_BRANCH 0x02
@@ -28,13 +29,11 @@ typedef union kl_bvh_node {
 } kl_bvh_node_t;
 
 typedef int  (*kl_bvh_filter_cb)(kl_sphere_t*, void*);
-typedef void (*kl_bvh_result_cb)(void*, void*);
-typedef void (*kl_bvh_debug_cb)(void*, void*);
 
 void kl_bvh_insert(kl_bvh_node_t **root, kl_sphere_t *bounds, void *item);
-void kl_bvh_search(kl_bvh_node_t *root, kl_bvh_filter_cb filtercb, void *filter_data, kl_bvh_result_cb resultcb, void *result_data);
+void kl_bvh_search(kl_bvh_node_t *root, kl_bvh_filter_cb filtercb, void *filter_data, kl_array_t *results);
 /* iterates through each node, for building graphs or displaying bounds: */
-void kl_bvh_debug(kl_bvh_node_t* root, kl_bvh_debug_cb debugcb, void *userdata);
+void kl_bvh_debug(kl_bvh_node_t* root, kl_array_t *results);
 
 #endif /* KL_BVHTREE_H */
 
