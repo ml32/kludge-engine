@@ -24,6 +24,8 @@
 static const float anisotropy = 4.0f;
 static const int   mipbias = 0;
 static const int   shadowsize = 512;
+static const int   ssaolevels = 5;
+#define MAXSSAOLEVELS 6
 
 static int convertenum(int value);
 static int create_shader(char *name, int type, const char *src, unsigned int *shader);
@@ -41,6 +43,8 @@ static void bind_ubo(unsigned int program, char *name, unsigned int binding);
 static unsigned int rbo_depth;
 static unsigned int tex_lighting;
 static unsigned int fbo_lighting;
+static unsigned int tex_shadow;
+static unsigned int fbo_shadow;
 static unsigned int ubo_envlight;
 static unsigned int ubo_scene;
 static unsigned int tex_noise;
@@ -56,8 +60,8 @@ static int gbuffer_uniform_tnormal;
 static int gbuffer_uniform_tspecular;
 static int gbuffer_uniform_temissive;
 static int gbufferback_uniform_tdiffuse;
-static unsigned int gbuffer_tex_depth[6];
-static unsigned int gbuffer_tex_back[6];
+static unsigned int gbuffer_tex_depth[MAXSSAOLEVELS];
+static unsigned int gbuffer_tex_back[MAXSSAOLEVELS];
 static unsigned int gbuffer_tex_normal;
 static unsigned int gbuffer_tex_diffuse;
 static unsigned int gbuffer_tex_specular;
@@ -71,7 +75,7 @@ static unsigned int downsample_fshader;
 static unsigned int downsample_program;
 static int downsample_uniform_tdepth;
 static int downsample_uniform_tback;
-static unsigned int downsample_fbo[5];
+static unsigned int downsample_fbo[MAXSSAOLEVELS-1];
 
 static unsigned int ssao_vshader;
 static unsigned int ssao_fshader;
@@ -79,8 +83,8 @@ static unsigned int ssao_program;
 static int ssao_uniform_tdepth;
 static int ssao_uniform_tnoise;
 static int ssao_uniform_tback;
-static unsigned int ssao_tex_occlusion[6];
-static unsigned int ssao_fbo[6];
+static unsigned int ssao_tex_occlusion[MAXSSAOLEVELS];
+static unsigned int ssao_fbo[MAXSSAOLEVELS];
 
 /* bilateral upsampling/blur */
 static unsigned int bilateral_vshader;
@@ -110,17 +114,33 @@ static int pointlight_uniform_tnormal;
 static int pointlight_uniform_tspecular;
 static int pointlight_uniform_tshadow;
 
+static unsigned int cubedepth_fshader;
+static unsigned int cubedepth_vshader;
+static unsigned int cubedepth_program;
+static int cubedepth_uniform_center;
+static int cubedepth_uniform_cubeproj;
+static int cubedepth_uniform_face;
+static int cubedepth_uniform_tdiffuse;
+static unsigned int cubedepth_tex_shadow;
+static unsigned int cubedepth_rbo_depth;
+static unsigned int cubedepth_fbo[6];
+
 static unsigned int pointshadow_fshader;
-static unsigned int pointshadow_gshader;
 static unsigned int pointshadow_vshader;
 static unsigned int pointshadow_program;
+static int pointshadow_uniform_tscreendepth;
+static int pointshadow_uniform_tcubedepth;
 static int pointshadow_uniform_center;
-static int pointshadow_uniform_cubeproj;
-static int pointshadow_uniform_face;
-static int pointshadow_uniform_tdiffuse;
-static unsigned int pointshadow_tex_shadow;
-static unsigned int pointshadow_rbo_depth;
-static unsigned int pointshadow_fbo[6];
+
+static unsigned int shadowfilter_fshader;
+static unsigned int shadowfilter_vshader;
+static unsigned int shadowfilter_program;
+static int shadowfilter_uniform_tdepth;
+static int shadowfilter_uniform_tnormal;
+static int shadowfilter_uniform_tshadow;
+static int shadowfilter_uniform_pass;
+static unsigned int shadowfilter_tex_shadow;
+static unsigned int shadowfilter_fbo;
 
 static unsigned int envlight_fshader;
 static unsigned int envlight_vshader;
@@ -408,6 +428,9 @@ void kl_gl3_pass_gbuffer(kl_array_t *models) {
 
   /* downsample the depth buffers */
   glUseProgram(downsample_program);
+  glUniform1i(downsample_uniform_tdepth, 0);
+  glUniform1i(downsample_uniform_tback, 1);
+  
   glBindVertexArray(vao_quad);
 
   for (int i=0; i < 5; i++) {
@@ -415,11 +438,8 @@ void kl_gl3_pass_gbuffer(kl_array_t *models) {
     unsigned int attachments[] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
     glDrawBuffers(2, attachments);
 
-    glUniform1i(downsample_uniform_tdepth, 0);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_RECTANGLE, gbuffer_tex_depth[i]);
-
-    glUniform1i(downsample_uniform_tback, 1);
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_RECTANGLE, gbuffer_tex_back[i]);
 
@@ -428,24 +448,23 @@ void kl_gl3_pass_gbuffer(kl_array_t *models) {
 
   /* render MSSAO */
   glUseProgram(ssao_program);
-  glBindVertexArray(vao_pquad);
-
+  
   glBindBufferBase(GL_UNIFORM_BUFFER, 0, ubo_scene);
+  glUniform1i(ssao_uniform_tdepth, 0);
+  glUniform1i(ssao_uniform_tback, 1);
+  glUniform1i(ssao_uniform_tnoise, 2);
+  
+  glBindVertexArray(vao_pquad);
 
   for (int i=0; i < 6; i++) {
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, ssao_fbo[i]);
     unsigned int attachments[] = {GL_COLOR_ATTACHMENT0};
     glDrawBuffers(1, attachments);
 
-    glUniform1i(ssao_uniform_tdepth, 0);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_RECTANGLE, gbuffer_tex_depth[i]);
-
-    glUniform1i(ssao_uniform_tback, 1);
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_RECTANGLE, gbuffer_tex_back[i]);
-
-    glUniform1i(ssao_uniform_tnoise, 2);
     glActiveTexture(GL_TEXTURE2);
     glBindTexture(GL_TEXTURE_2D, tex_noise);
 
@@ -453,25 +472,25 @@ void kl_gl3_pass_gbuffer(kl_array_t *models) {
   }
 
   glUseProgram(bilateral_program);
+  
+  glUniform1i(bilateral_uniform_thdepth, 0);
+  glUniform1i(bilateral_uniform_tldepth, 1);
+  glUniform1i(bilateral_uniform_timage, 2);
+  
   glBindVertexArray(vao_quad);
 
   glEnable(GL_BLEND);
   glBlendFunc(GL_ONE, GL_ONE);
 
-  for (int i=4; i >= 0; i--) {
+  for (int i=ssaolevels-2; i >= 0; i--) {
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, ssao_fbo[i]);
     unsigned int attachments[] = {GL_COLOR_ATTACHMENT0};
     glDrawBuffers(1, attachments);
 
-    glUniform1i(bilateral_uniform_thdepth, 0);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_RECTANGLE, gbuffer_tex_depth[i]);
-
-    glUniform1i(bilateral_uniform_tldepth, 1);
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_RECTANGLE, gbuffer_tex_depth[i+1]);
-
-    glUniform1i(bilateral_uniform_timage, 2);
     glActiveTexture(GL_TEXTURE2);
     glBindTexture(GL_TEXTURE_RECTANGLE, ssao_tex_occlusion[i+1]);
 
@@ -483,16 +502,11 @@ void kl_gl3_pass_gbuffer(kl_array_t *models) {
   glBindFramebuffer(GL_DRAW_FRAMEBUFFER, ssao_fbo[0]);
   unsigned int attachments[] = {GL_COLOR_ATTACHMENT0};
   glDrawBuffers(1, attachments);
-
-  glUniform1i(bilateral_uniform_thdepth, 0);
+  
   glActiveTexture(GL_TEXTURE0);
   glBindTexture(GL_TEXTURE_RECTANGLE, gbuffer_tex_depth[0]);
-
-  glUniform1i(bilateral_uniform_tldepth, 1);
   glActiveTexture(GL_TEXTURE1);
   glBindTexture(GL_TEXTURE_RECTANGLE, gbuffer_tex_depth[0]);
-
-  glUniform1i(bilateral_uniform_timage, 2);
   glActiveTexture(GL_TEXTURE2);
   glBindTexture(GL_TEXTURE_RECTANGLE, ssao_tex_occlusion[0]);
 
@@ -510,8 +524,8 @@ void kl_gl3_pass_pointshadow(kl_vec3f_t *center) {
   glEnable(GL_DEPTH_TEST);
   glDepthFunc(GL_LEQUAL);
   
-  glUseProgram(pointshadow_program);
-  glUniform3f(pointshadow_uniform_center, center->x, center->y, center->z);
+  glUseProgram(cubedepth_program);
+  glUniform3f(cubedepth_uniform_center, center->x, center->y, center->z);
   
   kl_array_t models;
   kl_array_init(&models, sizeof(kl_model_t*));
@@ -528,20 +542,47 @@ void kl_gl3_pass_pointshadow(kl_vec3f_t *center) {
   glCullFace(GL_BACK);
   glDisable(GL_CULL_FACE);
   glDisable(GL_DEPTH_TEST);
+  
+  glDepthMask(GL_FALSE); /* disable depth writes */
+  
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbo_shadow);
+  unsigned int attachments[] = {GL_COLOR_ATTACHMENT0};
+  glDrawBuffers(1, attachments);
+  
+  glUseProgram(pointshadow_program);
+
+  glBindBufferBase(GL_UNIFORM_BUFFER, 0, ubo_scene);
+  
+  glUniform1i(pointshadow_uniform_tscreendepth, 0);
+  glUniform1i(pointshadow_uniform_tcubedepth, 1);
+  glUniform3f(pointshadow_uniform_center, center->x, center->y, center->z);
+  
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_RECTANGLE, gbuffer_tex_depth[0]);
+  glActiveTexture(GL_TEXTURE1);
+  glBindTexture(GL_TEXTURE_CUBE_MAP, cubedepth_tex_shadow);
+  
+  glBindVertexArray(vao_pquad);
+  glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+  
+  glDepthMask(GL_TRUE);
+  
+  kl_gl3_pass_shadowfilter();
 }
 
 void kl_gl3_pass_pointshadow_face(int face, kl_array_t *models) {
-  glUniform1i(pointshadow_uniform_face, face);
+  glUniform1i(cubedepth_uniform_face, face);
+  glUniform1i(cubedepth_uniform_tdiffuse, 0);
   
   glViewport(0, 0, shadowsize, shadowsize);
-  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, pointshadow_fbo[face]);
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, cubedepth_fbo[face]);
   unsigned int attachments[] = {GL_COLOR_ATTACHMENT0};
   glDrawBuffers(1, attachments);
   
   float clearcolor[] = { 10000.0f, 10000.0f, 10000.0f, 10000.0f };
   glClearBufferfv(GL_COLOR, 0, clearcolor);
   glClear(GL_DEPTH_BUFFER_BIT);
- 
+  
   for (int i = 0; i < kl_array_size(models); i++) {
     kl_model_t *model;
     kl_array_get(models, i, &model);
@@ -551,7 +592,6 @@ void kl_gl3_pass_pointshadow_face(int face, kl_array_t *models) {
     for (int i=0; i < model->mesh_n; i++) {
       kl_mesh_t *mesh = model->mesh + i;
 
-      glUniform1i(pointshadow_uniform_tdiffuse, 0);
       glActiveTexture(GL_TEXTURE0);
       glBindTexture(GL_TEXTURE_2D, mesh->material->diffuse->id);
       
@@ -565,6 +605,51 @@ void kl_gl3_pass_pointshadow_face(int face, kl_array_t *models) {
   int w, h;
   kl_vid_size(&w, &h);
   glViewport(0, 0, w, h);
+}
+
+void kl_gl3_pass_shadowfilter() {
+  glDepthMask(GL_FALSE); /* disable depth writes */
+  
+  glBindVertexArray(vao_pquad);
+  
+  glUseProgram(shadowfilter_program);
+  
+  glUniform1i(shadowfilter_uniform_tdepth, 0);
+  glUniform1i(shadowfilter_uniform_tnormal, 1);
+  glUniform1i(shadowfilter_uniform_tshadow, 2);
+  
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, shadowfilter_fbo);
+  unsigned int attachments[] = {GL_COLOR_ATTACHMENT0};
+  glDrawBuffers(1, attachments);
+  
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_RECTANGLE, gbuffer_tex_depth[0]);
+  
+  glActiveTexture(GL_TEXTURE1);
+  glBindTexture(GL_TEXTURE_RECTANGLE, gbuffer_tex_normal);
+
+  glActiveTexture(GL_TEXTURE2);
+  glBindTexture(GL_TEXTURE_RECTANGLE, tex_shadow);
+  
+  glUniform1i(shadowfilter_uniform_pass, 0);
+  
+  glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+  
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbo_shadow);
+  glDrawBuffers(1, attachments);
+
+  glActiveTexture(GL_TEXTURE2);
+  glBindTexture(GL_TEXTURE_RECTANGLE, shadowfilter_tex_shadow);
+  
+  glUniform1i(shadowfilter_uniform_pass, 1);
+  
+  glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+  
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+  
+  glUseProgram(0);
+  
+  glDepthMask(GL_TRUE);
 }
 
 void kl_gl3_pass_envlight() {
@@ -586,26 +671,22 @@ void kl_gl3_pass_envlight() {
   glBindBufferBase(GL_UNIFORM_BUFFER, 1, ubo_envlight);
 
   glUniform1i(envlight_uniform_tdepth, 0);
+  glUniform1i(envlight_uniform_tnormal, 1);
+  glUniform1i(envlight_uniform_tdiffuse, 2);
+  glUniform1i(envlight_uniform_tspecular, 3);
+  glUniform1i(envlight_uniform_temissive, 4);
+  glUniform1i(envlight_uniform_tocclusion, 5);
+  
   glActiveTexture(GL_TEXTURE0);
   glBindTexture(GL_TEXTURE_RECTANGLE, gbuffer_tex_depth[0]);
-
-  glUniform1i(envlight_uniform_tnormal, 1);
   glActiveTexture(GL_TEXTURE1);
   glBindTexture(GL_TEXTURE_RECTANGLE, gbuffer_tex_normal);
-
-  glUniform1i(envlight_uniform_tdiffuse, 2);
   glActiveTexture(GL_TEXTURE2);
   glBindTexture(GL_TEXTURE_RECTANGLE, gbuffer_tex_diffuse);
-
-  glUniform1i(envlight_uniform_tspecular, 3);
   glActiveTexture(GL_TEXTURE3);
   glBindTexture(GL_TEXTURE_RECTANGLE, gbuffer_tex_specular);
-
-  glUniform1i(envlight_uniform_temissive, 4);
   glActiveTexture(GL_TEXTURE4);
   glBindTexture(GL_TEXTURE_RECTANGLE, gbuffer_tex_emissive);
-
-  glUniform1i(envlight_uniform_tocclusion, 5);
   glActiveTexture(GL_TEXTURE5);
   glBindTexture(GL_TEXTURE_RECTANGLE, ssao_tex_occlusion[0]);
 
@@ -627,26 +708,12 @@ void kl_gl3_pass_pointlight(kl_array_t *lights) {
   glUseProgram(pointlight_program);
 
   glBindBufferBase(GL_UNIFORM_BUFFER, 0, ubo_scene);
-
+  
   glUniform1i(pointlight_uniform_tdepth, 0);
-  glActiveTexture(GL_TEXTURE0);
-  glBindTexture(GL_TEXTURE_RECTANGLE, gbuffer_tex_depth[0]);
-
   glUniform1i(pointlight_uniform_tnormal, 1);
-  glActiveTexture(GL_TEXTURE1);
-  glBindTexture(GL_TEXTURE_RECTANGLE, gbuffer_tex_normal);
-
   glUniform1i(pointlight_uniform_tdiffuse, 2);
-  glActiveTexture(GL_TEXTURE2);
-  glBindTexture(GL_TEXTURE_RECTANGLE, gbuffer_tex_diffuse);
-
   glUniform1i(pointlight_uniform_tspecular, 3);
-  glActiveTexture(GL_TEXTURE3);
-  glBindTexture(GL_TEXTURE_RECTANGLE, gbuffer_tex_specular);
-
   glUniform1i(pointlight_uniform_tshadow, 4);
-  glActiveTexture(GL_TEXTURE4);
-  glBindTexture(GL_TEXTURE_CUBE_MAP, pointshadow_tex_shadow);
   
   glUseProgram(0);
   
@@ -665,8 +732,8 @@ void kl_gl3_pass_pointlight(kl_array_t *lights) {
     kl_gl3_pass_pointshadow(&light->position);
 
     /* setup lighting pass */
-    glDepthMask(GL_FALSE); /* disable depth writes */
     glEnable(GL_STENCIL_TEST);
+    glDepthMask(GL_FALSE); /* disable depth writes */
     
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbo_lighting);
     unsigned int attachments[] = {GL_COLOR_ATTACHMENT0};
@@ -706,6 +773,17 @@ void kl_gl3_pass_pointlight(kl_array_t *lights) {
     glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
 
     glBindBufferBase(GL_UNIFORM_BUFFER, 1, light->id);
+    
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_RECTANGLE, gbuffer_tex_depth[0]);
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_RECTANGLE, gbuffer_tex_normal);
+    glActiveTexture(GL_TEXTURE2);
+    glBindTexture(GL_TEXTURE_RECTANGLE, gbuffer_tex_diffuse);
+    glActiveTexture(GL_TEXTURE3);
+    glBindTexture(GL_TEXTURE_RECTANGLE, gbuffer_tex_specular);
+    glActiveTexture(GL_TEXTURE4);
+    glBindTexture(GL_TEXTURE_RECTANGLE, tex_shadow);
 
     glBindVertexArray(vao_pquad);
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
@@ -777,7 +855,8 @@ void kl_gl3_composite(float dt) {
     float b = samples[i*3+2];
     if (isnan(r) || isnan(g) || isnan(b)) continue;
     
-    float Y = 0.299f * r + 0.587f * g + 0.114f * b;
+    //float Y = 0.299f * r + 0.587f * g + 0.114f * b;
+    float Y = 0.333f * r + 0.333f * g + 0.333f * b;
     
     /* calculate gaussian weight */
     float x = i % w - w/2;
@@ -793,7 +872,7 @@ void kl_gl3_composite(float dt) {
   
   /* determine half-brightness level */
   const float lambda   = 1.0f; /* rate of decay */
-  const float exposure = 1.0f / 8.0f;
+  const float exposure = 1.0f / 7.0f;
   const float minsigma = 0.25f; /* the minimum light level that the viewer can adapt to */
   float decay = exp(-lambda * dt);
   luminance = decay * luminance + (1.0f - decay) * mean;
@@ -806,12 +885,12 @@ void kl_gl3_composite(float dt) {
   glUseProgram(tonemap_program);
 
   glUniform1i(tonemap_uniform_tcomposite, 0);
-  glActiveTexture(GL_TEXTURE0);
-  glBindTexture(GL_TEXTURE_2D, tex_lighting);
-  
   glUniform1f(tonemap_uniform_sigma, sigma);
 
   glBindVertexArray(vao_quad);
+  
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, tex_lighting);
 
   glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0); 
 
@@ -840,6 +919,9 @@ void kl_gl3_debugtex(int mode) {
       blit_to_screen(gbuffer_tex_depth[5], 0.18, 0.18,  0.78, -0.785, 0.001, 0.0);
       break;
     case 2:
+      blit_to_screen(gbuffer_tex_normal, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0);
+      break;
+    case 3:
       blit_to_screen(gbuffer_tex_back[0], 1.0, 1.0, 0.0, 0.0, 0.001, 0.0);
       blit_to_screen(gbuffer_tex_back[1], 0.18, 0.18, -0.78, -0.785, 0.001, 0.0);
       blit_to_screen(gbuffer_tex_back[2], 0.18, 0.18, -0.39, -0.785, 0.001, 0.0);
@@ -847,7 +929,7 @@ void kl_gl3_debugtex(int mode) {
       blit_to_screen(gbuffer_tex_back[4], 0.18, 0.18,  0.39, -0.785, 0.001, 0.0);
       blit_to_screen(gbuffer_tex_back[5], 0.18, 0.18,  0.78, -0.785, 0.001, 0.0);
       break;
-    case 3:
+    case 4:
       blit_to_screen(ssao_tex_occlusion[0], 1.0, 1.0, 0.0, 0.0, -1.0, 1.0);
       blit_to_screen(ssao_tex_occlusion[1], 0.18, 0.18, -0.78, -0.785, -1.0, 1.0);
       blit_to_screen(ssao_tex_occlusion[2], 0.18, 0.18, -0.39, -0.785, -1.0, 1.0);
@@ -855,10 +937,11 @@ void kl_gl3_debugtex(int mode) {
       blit_to_screen(ssao_tex_occlusion[4], 0.18, 0.18,  0.39, -0.785, -1.0, 1.0);
       blit_to_screen(ssao_tex_occlusion[5], 0.18, 0.18,  0.78, -0.785, -1.0, 1.0);
       break;
-    case 4:
+    case 5:
+      blit_to_screen(tex_shadow, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0);
       glEnable(GL_BLEND);
       glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-      blit_cube_to_screen(pointshadow_tex_shadow, 0.225, 0.4, 0.0, -0.6, 0.001, 0.0);
+      blit_cube_to_screen(cubedepth_tex_shadow, 0.225, 0.4, 0.0, -0.6, 0.001, 0.0);
       glDisable(GL_BLEND);
       break;
   }
@@ -1137,8 +1220,8 @@ static int init_gbuffer(int width, int height) {
   /* specular: 8 intensity, 8 exponent, 8 fresnel coeff (perpendicular reflectance), 8 unused */
   /* emissive: 8 red, 8 blue, 8 green, 8 intensity exponent */
   
-  glGenTextures(6, gbuffer_tex_depth);
-  glGenTextures(6, gbuffer_tex_back);
+  glGenTextures(MAXSSAOLEVELS, gbuffer_tex_depth);
+  glGenTextures(MAXSSAOLEVELS, gbuffer_tex_back);
   glGenTextures(1, &gbuffer_tex_normal);
   glGenTextures(1, &gbuffer_tex_diffuse);
   glGenTextures(1, &gbuffer_tex_specular);
@@ -1146,7 +1229,7 @@ static int init_gbuffer(int width, int height) {
 
   int w = width;
   int h = height;
-  for (int i=0; i < 6; i++) {
+  for (int i=0; i < MAXSSAOLEVELS; i++) {
     glBindTexture(GL_TEXTURE_RECTANGLE, gbuffer_tex_depth[i]);
     glTexImage2D(GL_TEXTURE_RECTANGLE, 0, GL_RG16F, w, h, 0, GL_RED, GL_FLOAT, NULL);
     glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -1204,7 +1287,7 @@ static int init_gbuffer(int width, int height) {
  
   glGenFramebuffers(1, &gbuffer_fbo_front);
   glGenFramebuffers(1, &gbuffer_fbo_back);
-  glGenFramebuffers(5, downsample_fbo);
+  glGenFramebuffers(MAXSSAOLEVELS-1, downsample_fbo);
 
   glBindFramebuffer(GL_FRAMEBUFFER, gbuffer_fbo_front);
   glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_RECTANGLE, gbuffer_tex_depth[0], 0);
@@ -1228,7 +1311,7 @@ static int init_gbuffer(int width, int height) {
     return -1;
   }
 
-  for (int i=0; i<5; i++) {
+  for (int i=0; i<MAXSSAOLEVELS-1; i++) {
     glBindFramebuffer(GL_FRAMEBUFFER, downsample_fbo[i]);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_RECTANGLE, gbuffer_tex_depth[i+1], 0);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_RECTANGLE, gbuffer_tex_back[i+1], 0);
@@ -1289,10 +1372,10 @@ static int init_ssao(int width, int height) {
   int h = height;
   for (int i=0; i < 6; i++) {
     glBindTexture(GL_TEXTURE_RECTANGLE, ssao_tex_occlusion[i]);
-    //glTexImage2D(GL_TEXTURE_RECTANGLE, 0, GL_R8, w, h, 0, GL_RED, GL_UNSIGNED_BYTE, NULL);
-    glTexImage2D(GL_TEXTURE_RECTANGLE, 0, GL_R16F, w, h, 0, GL_RED, GL_FLOAT, NULL);
-    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexImage2D(GL_TEXTURE_RECTANGLE, 0, GL_R8, w, h, 0, GL_RED, GL_UNSIGNED_BYTE, NULL);
+    //glTexImage2D(GL_TEXTURE_RECTANGLE, 0, GL_R16F, w, h, 0, GL_RED, GL_FLOAT, NULL);
+    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_SWIZZLE_R, GL_RED);
@@ -1408,9 +1491,54 @@ static int init_lighting(int width, int height) {
   }
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
   
+  glGenTextures(1, &tex_shadow);
+  glBindTexture(GL_TEXTURE_RECTANGLE, tex_shadow);
+  glTexImage2D(GL_TEXTURE_RECTANGLE, 0, GL_R8, width, height, 0, GL_RED, GL_UNSIGNED_BYTE, NULL);
+  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_SWIZZLE_R, GL_RED);
+  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_SWIZZLE_G, GL_RED);
+  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_SWIZZLE_B, GL_RED);
+  glBindTexture(GL_TEXTURE_RECTANGLE, 0);
+
+  glGenFramebuffers(1, &fbo_shadow);
+  glBindFramebuffer(GL_FRAMEBUFFER, fbo_shadow);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_RECTANGLE, tex_shadow, 0);
+  glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, rbo_depth);
+  status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+  if (status != GL_FRAMEBUFFER_COMPLETE) {
+    fprintf(stderr, "Render: shadow framebuffer is incomplete.\n\tDetails: %x\n", status);
+    return -1;
+  }
   
-  glGenTextures(1, &pointshadow_tex_shadow);
-  glBindTexture(GL_TEXTURE_CUBE_MAP, pointshadow_tex_shadow);
+  glGenTextures(1, &shadowfilter_tex_shadow);
+  glBindTexture(GL_TEXTURE_RECTANGLE, shadowfilter_tex_shadow);
+  glTexImage2D(GL_TEXTURE_RECTANGLE, 0, GL_R8, width, height, 0, GL_RED, GL_UNSIGNED_BYTE, NULL);
+  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_SWIZZLE_R, GL_RED);
+  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_SWIZZLE_G, GL_RED);
+  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_SWIZZLE_B, GL_RED);
+  glBindTexture(GL_TEXTURE_RECTANGLE, 0);
+
+  glGenFramebuffers(1, &shadowfilter_fbo);
+  glBindFramebuffer(GL_FRAMEBUFFER, shadowfilter_fbo);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_RECTANGLE, shadowfilter_tex_shadow, 0);
+  glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, rbo_depth);
+  status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+  if (status != GL_FRAMEBUFFER_COMPLETE) {
+    fprintf(stderr, "Render: shadow framebuffer is incomplete.\n\tDetails: %x\n", status);
+    return -1;
+  }
+  
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  
+  glGenTextures(1, &cubedepth_tex_shadow);
+  glBindTexture(GL_TEXTURE_CUBE_MAP, cubedepth_tex_shadow);
   glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
   glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
   glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -1423,18 +1551,18 @@ static int init_lighting(int width, int height) {
     glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, GL_R32F, shadowsize, shadowsize, 0, GL_RED, GL_FLOAT, NULL);
   }
   
-  glGenRenderbuffers(1, &pointshadow_rbo_depth);
-  glBindRenderbuffer(GL_RENDERBUFFER, pointshadow_rbo_depth);
+  glGenRenderbuffers(1, &cubedepth_rbo_depth);
+  glBindRenderbuffer(GL_RENDERBUFFER, cubedepth_rbo_depth);
   glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, shadowsize, shadowsize);
   glBindRenderbuffer(GL_RENDERBUFFER, 0);
   
   glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
 
-  glGenFramebuffers(6, pointshadow_fbo);
+  glGenFramebuffers(6, cubedepth_fbo);
   for (int i=0; i < 6; i++) {
-    glBindFramebuffer(GL_FRAMEBUFFER, pointshadow_fbo[i]);
-    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, pointshadow_rbo_depth);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, pointshadow_tex_shadow, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, cubedepth_fbo[i]);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, cubedepth_rbo_depth);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, cubedepth_tex_shadow, 0);
     status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
     if (status != GL_FRAMEBUFFER_COMPLETE) {
       fprintf(stderr, "Render: Point light shadow mapping framebuffer is incomplete.\n\tDetails: %x\n", status);
@@ -1457,9 +1585,9 @@ static int init_lighting(int width, int height) {
   pointlight_uniform_tshadow    = glGetUniformLocation(pointlight_program, "tshadow");
 
   /* point light shadow mapping (cubemap render) */
-  if (create_shader("point shadow vertex shader", GL_VERTEX_SHADER, vshader_pointshadow_src, &pointshadow_vshader) < 0) return -1;
-  if (create_shader("point shadow fragment shader", GL_FRAGMENT_SHADER, fshader_pointshadow_src, &pointshadow_fshader) < 0) return -1;
-  if (create_program("point shadow shader program", pointshadow_vshader, 0, pointshadow_fshader, &pointshadow_program) < 0) return -1;
+  if (create_shader("omnidirectional depth vertex shader", GL_VERTEX_SHADER, vshader_cubedepth_src, &cubedepth_vshader) < 0) return -1;
+  if (create_shader("omnidirectional depth fragment shader", GL_FRAGMENT_SHADER, fshader_cubedepth_src, &cubedepth_fshader) < 0) return -1;
+  if (create_program("omnidirectional depth shader program", cubedepth_vshader, 0, cubedepth_fshader, &cubedepth_program) < 0) return -1;
   
   kl_mat4f_t cubeproj[6];
   kl_mat4f_t proj;
@@ -1479,14 +1607,32 @@ static int init_lighting(int width, int height) {
   view = (kl_mat4f_t)KL_MAT4F_NEGZ;
   kl_mat4f_mul(&cubeproj[5], &proj, &view);
   
-  pointshadow_uniform_center   = glGetUniformLocation(pointshadow_program, "center");
-  pointshadow_uniform_cubeproj = glGetUniformLocation(pointshadow_program, "cubeproj");
-  pointshadow_uniform_face     = glGetUniformLocation(pointshadow_program, "face");
-  pointshadow_uniform_tdiffuse = glGetUniformLocation(pointshadow_program, "tdiffuse");
+  cubedepth_uniform_center   = glGetUniformLocation(cubedepth_program, "center");
+  cubedepth_uniform_cubeproj = glGetUniformLocation(cubedepth_program, "cubeproj");
+  cubedepth_uniform_face     = glGetUniformLocation(cubedepth_program, "face");
+  cubedepth_uniform_tdiffuse = glGetUniformLocation(cubedepth_program, "tdiffuse");
   
-  glUseProgram(pointshadow_program);
-  glUniformMatrix4fv(pointshadow_uniform_cubeproj, 6, GL_FALSE, (float*)cubeproj);
+  glUseProgram(cubedepth_program);
+  glUniformMatrix4fv(cubedepth_uniform_cubeproj, 6, GL_FALSE, (float*)cubeproj);
   glUseProgram(0);
+  
+  if (create_shader("point-light shadow vertex shader", GL_VERTEX_SHADER, vshader_pointshadow_src, &pointshadow_vshader) < 0) return -1;
+  if (create_shader("point-light shadow fragment shader", GL_FRAGMENT_SHADER, fshader_pointshadow_src, &pointshadow_fshader) < 0) return -1;
+  if (create_program("point-light shadow shader program", pointshadow_vshader, 0, pointshadow_fshader, &pointshadow_program) < 0) return -1;
+  
+  bind_ubo(pointlight_program, "scene", 0);
+  pointshadow_uniform_tscreendepth = glGetUniformLocation(pointshadow_program, "tscreendepth");
+  pointshadow_uniform_tcubedepth   = glGetUniformLocation(pointshadow_program, "tcubedepth");
+  pointshadow_uniform_center       = glGetUniformLocation(pointshadow_program, "center");
+  
+  if (create_shader("screen-space shadow filter vertex shader", GL_VERTEX_SHADER, vshader_shadowfilter_src, &shadowfilter_vshader) < 0) return -1;
+  if (create_shader("screen-space shadow filter fragment shader", GL_FRAGMENT_SHADER, fshader_shadowfilter_src, &shadowfilter_fshader) < 0) return -1;
+  if (create_program("screen-space shadow filter shader program", shadowfilter_vshader, 0, shadowfilter_fshader, &shadowfilter_program) < 0) return -1;
+  
+  shadowfilter_uniform_tdepth  = glGetUniformLocation(shadowfilter_program, "tdepth");
+  shadowfilter_uniform_tnormal = glGetUniformLocation(shadowfilter_program, "tnormal");
+  shadowfilter_uniform_tshadow = glGetUniformLocation(shadowfilter_program, "tshadow");
+  shadowfilter_uniform_pass    = glGetUniformLocation(shadowfilter_program, "pass");
 
   /* environmental lighting */
   if (create_shader("environmental lighting vertex shader", GL_VERTEX_SHADER, vshader_envlight_src, &envlight_vshader) < 0) return -1;

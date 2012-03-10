@@ -164,6 +164,24 @@ DEF_NORMAL_ENCODING
 "  float ao = max(0.0, costheta);\n"
 "  return ao * falloff;\n"
 "}\n"
+"vec2 poisson[] = vec2[](\n"
+"  vec2( 0.3085, -0.1495),\n"
+"  vec2( 0.5075,  0.4990),\n"
+"  vec2( 0.4927, -0.7529),\n"
+"  vec2( 0.7344, -0.0500),\n"
+"  vec2( 0.0734,  0.4966),\n"
+"  vec2(-0.2320, -0.5536),\n"
+"  vec2(-0.2422,  0.2106),\n"
+"  vec2(-0.6254, -0.4917),\n"
+"  vec2(-0.7222, -0.0555),\n"
+"  vec2( 0.0966, -0.9465),\n"
+"  vec2( 0.1808, -0.5089),\n"
+"  vec2( 0.1146,  0.9233),\n"
+"  vec2(-0.4045,  0.7184),\n"
+"  vec2(-0.7903,  0.5653),\n"
+"  vec2( 0.7250, -0.4404),\n"
+"  vec2(-0.2766, -0.1738)\n"
+");\n"
 "void main() {\n"
 "  float depth  = texture(tdepth, gl_FragCoord.xy).r;\n"
 "  vec3 coord  = fray_eye * depth;\n"
@@ -173,7 +191,7 @@ DEF_NORMAL_ENCODING
 ""
 "  float occlusion = 0.0;\n"
 "  for (int i=0; i < 16; i++) {\n"
-"    vec2  offset = 4.0 * normalize(texture(tnoise, (gl_FragCoord.xy + vec2(1 << (i / 4), 1 << (i % 4))) / 256.0).xyz * 2.0 - 1.0).xy;\n"
+"    vec2  offset = 8.0 * poisson[i];\n"
 "    vec2  occluder_texcoord = gl_FragCoord.xy + offset;\n"
 "    float occluder_fdepth = texture(tdepth, occluder_texcoord).r;\n"
 "    float occluder_bdepth = texture(tback, occluder_texcoord).r;\n"
@@ -185,10 +203,10 @@ DEF_NORMAL_ENCODING
 "    vec3 occluder_bcoord = occluder_bdepth * occluder_ray;\n"
 "    vec3 occluder_foffset = occluder_fcoord - coord;\n"
 "    vec3 occluder_boffset = occluder_bcoord - coord;\n"
-"    occlusion += calc_ao(occluder_foffset, normal, 16.0);\n"
-"    occlusion += calc_ao(occluder_boffset, normal, 16.0);\n"
+"    occlusion += calc_ao(occluder_foffset, normal, 64.0);\n"
+"    occlusion += calc_ao(occluder_boffset, normal, 64.0);\n"
 "  };\n"
-"  ssao = occlusion / 32.0;\n"
+"  ssao = occlusion / 48.0;\n"
 "}\n";
 
 static const char *vshader_bilateral_src = 
@@ -204,6 +222,7 @@ static const char *fshader_bilateral_src =
 "uniform sampler2DRect tldepth;\n" /* low-rez depth */
 "uniform sampler2DRect timage;\n"
 "layout(location = 0) out vec4 color;\n"
+/*
 "float weight[] = float[](\n"
 "  1.0, 2.0, 1.0,\n"
 "  2.0, 4.0, 2.0,\n"
@@ -214,19 +233,77 @@ static const char *fshader_bilateral_src =
 "  vec2(-1,  0), vec2( 0,  0), vec2( 1,  0),\n"
 "  vec2(-1,  1), vec2( 0,  1), vec2( 1,  1)\n"
 ");\n"
+*/
+"float weight[] = float[](\n"
+"  1.0,  4.0,  7.0,  4.0, 1.0,\n"
+"  4.0, 16.0, 26.0, 16.0, 4.0,\n"
+"  7.0, 26.0, 41.0, 26.0, 7.0,\n"
+"  4.0, 16.0, 26.0, 16.0, 4.0,\n"
+"  1.0,  4.0,  7.0,  4.0, 1.0\n"
+");\n"
+"vec2 offset[] = vec2[](\n"
+"  vec2(-2, -2), vec2(-1, -2), vec2( 0, -2), vec2( 1, -2), vec2( 2, -2),\n"
+"  vec2(-2, -1), vec2(-1, -1), vec2( 0, -1), vec2( 1, -1), vec2( 2, -1),\n"
+"  vec2(-2,  0), vec2(-1,  0), vec2( 0,  0), vec2( 1,  0), vec2( 2,  0),\n"
+"  vec2(-2,  1), vec2(-1,  1), vec2( 0,  1), vec2( 1,  1), vec2( 2,  1),\n"
+"  vec2(-2,  2), vec2(-1,  2), vec2( 0,  2), vec2( 1,  2), vec2( 2,  2)\n"
+");\n"
 "void main() {\n"
 "  vec2  ratio = textureSize(thdepth) / textureSize(tldepth);\n"
 "  float depth = texture(thdepth, gl_FragCoord.xy).r;\n"
 "  float total = 0.0;\n"
 "  vec4  value = vec4(0.0, 0.0, 0.0, 0.0);\n"
-"  for (int i=0; i < 9; i++) {\n"
-"      vec2 texcoord = gl_FragCoord.xy / ratio + offset[i];\n"
+"  for (int i=0; i < 25; i++) {\n"
+"      vec2 texcoord = gl_FragCoord.xy / ratio + 2.0 * offset[i];\n"
 "      float sample_depth = texture(tldepth, texcoord).r;\n"
-"      float scale = abs(sample_depth - depth) > 16.0 ? 0.0 : 1.0;\n"
+"      float scale = abs(sample_depth - depth) > 3.0 ? 0.0 : 1.0;\n"
 "      value += scale * weight[i] * texture(timage, texcoord);\n"
 "      total += scale * weight[i];\n"
 "  }\n"
 "  color = total < 0.01 ? vec4(0.0, 0.0, 0.0, 0.0) : value / total;\n"
+"}\n";
+
+static const char *vshader_shadowfilter_src = 
+"#version 330\n"
+"layout(location = 0) in vec2 vcoord;\n"
+"layout(location = 1) in vec3 vray_eye;\n"
+"layout(location = 2) in vec3 vray_world;\n"
+"smooth out vec3 fray_eye;\n"
+"void main () {\n"
+"  fray_eye = vray_eye;\n"
+"  gl_Position = vec4(vcoord, 0.0, 1.0);\n"
+"}\n";
+
+static const char *fshader_shadowfilter_src =
+"#version 330\n"
+"uniform sampler2DRect tdepth;\n"
+"uniform sampler2DRect tnormal;\n"
+"uniform sampler2DRect tshadow;\n"
+"uniform int pass;\n"
+"smooth in vec3 fray_eye;\n"
+"layout(location = 0) out float shadow;\n"
+"float weights[] = float[](0.2369, 0.5273, 0.8521, 1.0000, 0.8521, 0.5273, 0.2369);\n"
+DEF_NORMAL_ENCODING
+"void main() {\n"
+"  float depth = texture(tdepth, gl_FragCoord.xy).r;\n"
+"  vec3 N = decode_normal(texture(tnormal, gl_FragCoord.xy).xy);\n"
+"  vec3 T = normalize(cross(N, vec3(0.0, 0.0, -1.0)));\n"
+"  vec3 B = normalize(cross(N, T));\n"
+"  vec2 axis = pass == 0 ? normalize(T.xy) : B.xy;\n"
+"  float total = 0.0;\n"
+"  float value = 0.0;\n"
+"  for (int i=0; i < 7; i++) {\n"
+"      float scale = min(1000.0 / depth, 4.0);\n"
+"      vec2 offset = scale * axis * (i - 3);\n"
+"      vec2 texcoord = gl_FragCoord.xy + offset;\n"
+"      float sample_depth = texture(tdepth, texcoord).r;\n"
+""
+"      float cutoff = abs(sample_depth - depth) > 3.0 ? 0.0 : 1.0;\n"
+"      float weight = weights[i];\n"
+"      value += cutoff * weight * texture(tshadow, texcoord).r;\n"
+"      total += cutoff * weight;\n"
+"  }\n"
+"  shadow = total < 0.01 ? 0.0 : value / total;\n"
 "}\n";
 
 static const char *vshader_minimal_src = 
@@ -257,20 +334,15 @@ DEF_BLOCK_SCENE
 "layout(location = 1) in vec3 vray_eye;\n"
 "layout(location = 2) in vec3 vray_world;\n"
 "smooth out vec3 fray_eye;\n"
-"smooth out vec3 fray_world;\n"
 "smooth out vec3 fcenter_eye;\n"
-"smooth out vec3 fcenter_world;\n"
 "void main () {\n"
 "  fray_eye      = vray_eye;\n"
-"  fray_world    = vray_world;\n"
 "  fcenter_eye   = (viewmatrix * light.position).xyz;\n"
-"  fcenter_world = light.position.xyz;\n"
 "  gl_Position = vec4(vcoord, 0.0, 1.0);\n"
 "}\n";
 
 static const char *fshader_pointlight_src =
 "#version 330\n"
-DEF_BLOCK_SCENE
 "layout(std140) uniform pointlight {\n"
 "  vec4  position;\n"
 "  vec4  color;\n"
@@ -279,24 +351,15 @@ DEF_BLOCK_SCENE
 "uniform sampler2DRect tnormal;\n"
 "uniform sampler2DRect tdiffuse;\n"
 "uniform sampler2DRect tspecular;\n"
-"uniform samplerCube   tshadow;\n"
+"uniform sampler2DRect tshadow;\n"
 "smooth in vec3 fray_eye;\n"
 "smooth in vec3 fray_world;\n"
 "smooth in vec3 fcenter_eye;\n"
-"smooth in vec3 fcenter_world;\n"
 "layout(location = 0) out vec4 color;\n"
 DEF_NORMAL_ENCODING
-"float Linfdist(vec3 a, vec3 b) {;\n" /* distance in L-infinity space */
-"  float dist = 0.0f;\n"
-"  dist = max(dist, abs(a.x - b.x));\n"
-"  dist = max(dist, abs(a.y - b.y));\n"
-"  dist = max(dist, abs(a.z - b.z));\n"
-"  return dist;\n"
-"}\n"
 "void main () {\n"
 "  float depth = texture(tdepth, gl_FragCoord.xy).r;\n"
 "  vec3  coord_eye   = fray_eye * depth;\n"
-"  vec3  coord_world = fray_world * depth + viewpos;\n"
 "  float dist      = distance(fcenter_eye, coord_eye);\n"
 "  float luminance = light.color.a / (dist * dist);\n"
 ""
@@ -313,7 +376,7 @@ DEF_NORMAL_ENCODING
 "  float fresnel = fresnel_0 + (1.0 - fresnel_0) * pow(1.0 - dot(V, H), 5.0);\n" /* fresnel term */
 ""
 "  const float epsilon = 1.0;\n"
-"  float shadow = dist - epsilon < texture(tshadow, coord_world - fcenter_world).r ? 1.0 : 0.0;\n"
+"  float shadow = texture(tshadow, gl_FragCoord.xy).r;\n"
 ""
 "  color.rgb  = diff * max(0.0, dot(N, L));\n" /* diffuse */
 "  vec3  spec_intensity = spec.rrr;\n"
@@ -329,10 +392,8 @@ static const char *vshader_envlight_src =
 "layout(location = 1) in vec3 vray_eye;\n"
 "layout(location = 2) in vec3 vray_world;\n"
 "smooth out vec3 fray_eye;\n"
-"smooth out vec3 fray_world;\n"
 "void main () {\n"
 "  fray_eye    = vray_eye;\n"
-"  fray_world  = vray_world;\n"
 "  gl_Position = vec4(vcoord, 0.0, 1.0);\n"
 "}\n";
 
@@ -351,18 +412,16 @@ DEF_BLOCK_SCENE
 "uniform sampler2DRect temissive;\n"
 "uniform sampler2DRect tocclusion;\n"
 "smooth in vec3 fray_eye;\n"
-"smooth in vec3 fray_world;\n"
 "smooth in vec2 ftexcoord;\n"
 "layout(location = 0) out vec4 color;\n"
 DEF_NORMAL_ENCODING
 "void main () {\n"
 "  float depth = texture(tdepth, gl_FragCoord.xy).r;\n"
 "  vec3  coord_eye = fray_eye * depth;\n"
-"  vec3  coord_world = fray_world * depth + viewpos;\n"
 ""
 "  vec3 N = decode_normal(texture(tnormal, gl_FragCoord.xy).xy);\n"
 ""
-"  float occlusion = pow(1.0 - max(0.0, texture(tocclusion, gl_FragCoord.xy).r), 2.0);\n"
+"  float occlusion = pow(1.0 - max(0.0, texture(tocclusion, gl_FragCoord.xy).r), 1.5);\n"
 ""
 "  vec3 L = normalize(viewrot * -light.direction.xyz);\n"
 "  vec3 V = -normalize(fray_eye);\n"
@@ -376,7 +435,7 @@ DEF_NORMAL_ENCODING
 "  float fresnel_0 = spec.b;\n"
 "  float fresnel = fresnel_0 + (1.0 - fresnel_0) * pow(1.0 - dot(V, H), 5.0);\n" /* fresnel term */
 ""
-"  color.rgb += diff * max(0.0, dot(N, L));\n" /* diffuse */
+"  color.rgb  = diff * max(0.0, dot(N, L));\n" /* diffuse */
 "  vec3  spec_intensity = spec.rrr;\n"
 "  float spec_exponent  = spec.g * 255.0;\n"
 "  color.rgb += spec_intensity * fresnel * pow(max(0.0, dot(R, V)), spec_exponent);\n" /* specular */
@@ -386,7 +445,7 @@ DEF_NORMAL_ENCODING
 "  color.a    = 1.0;\n"
 "}\n";
 
-static const char *vshader_pointshadow_src =
+static const char *vshader_cubedepth_src =
 "#version 330\n"
 "uniform vec3 center;\n"
 "uniform mat4 cubeproj[6];\n"
@@ -403,7 +462,7 @@ static const char *vshader_pointshadow_src =
 "  gl_Position = cubeproj[face] * vec4(vposition - center, 1.0);\n"
 "}\n";
 
-static const char *fshader_pointshadow_src = 
+static const char *fshader_cubedepth_src = 
 "#version 330\n"
 "uniform sampler2D tdiffuse;\n"
 "smooth in float fdist;\n"
@@ -413,6 +472,45 @@ static const char *fshader_pointshadow_src =
 "  float alpha = texture(tdiffuse, ftexcoord).a;\n"
 "  if (alpha < 0.5) discard;\n"
 "  dist = fdist;\n"
+"}\n";
+
+static const char *vshader_pointshadow_src = 
+"#version 330\n"
+DEF_BLOCK_SCENE
+"uniform vec3 center;\n"
+"layout(location = 0) in vec2 vcoord;\n"
+"layout(location = 1) in vec3 vray_eye;\n"
+"layout(location = 2) in vec3 vray_world;\n"
+"smooth out vec3 fray_eye;\n"
+"smooth out vec3 fray_world;\n"
+"smooth out vec3 fcenter_eye;\n"
+"smooth out vec3 fcenter_world;\n"
+"void main () {\n"
+"  fray_eye      = vray_eye;\n"
+"  fray_world    = vray_world;\n"
+"  fcenter_eye   = (viewmatrix * vec4(center, 1.0)).xyz;\n"
+"  fcenter_world = center;\n"
+"  gl_Position = vec4(vcoord, 0.0, 1.0);\n"
+"}\n";
+
+static const char *fshader_pointshadow_src =
+"#version 330\n"
+DEF_BLOCK_SCENE
+"uniform sampler2DRect tscreendepth;\n"
+"uniform samplerCube   tcubedepth;\n"
+"smooth in vec3 fray_eye;\n"
+"smooth in vec3 fray_world;\n"
+"smooth in vec3 fcenter_eye;\n"
+"smooth in vec3 fcenter_world;\n"
+"layout(location = 0) out float shadow;\n"
+"void main () {\n"
+"  float depth = texture(tscreendepth, gl_FragCoord.xy).r;\n"
+"  vec3  coord_eye   = fray_eye * depth;\n"
+"  vec3  coord_world = fray_world * depth + viewpos;\n"
+"  float dist = distance(fcenter_eye, coord_eye);\n"
+""
+"  const float epsilon = 1.0;\n"
+"  shadow = dist - epsilon < texture(tcubedepth, coord_world - fcenter_world).r ? 1.0 : 0.0;\n"
 "}\n";
 
 static const char *vshader_tonemap_src = 

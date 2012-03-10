@@ -1,0 +1,2 @@
+-Write functions to create textures/FBOs instead of repetitious OpenGL code
+-Do the same for full-screen quad filtering
