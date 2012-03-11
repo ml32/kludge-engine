@@ -31,6 +31,10 @@ static const int   ssaolevels = 5;
 static int convertenum(int value);
 static int create_shader(char *name, int type, const char *src, unsigned int *shader);
 static int create_program(char *name, unsigned int vshader, unsigned int gshader, unsigned int fshader, unsigned int *program);
+static unsigned int create_rendertexture(unsigned int target, bool filter, bool swizzle);
+static void initialize_rendertexture(unsigned int texture, unsigned int target, unsigned int format, int width, int height);
+static void initialize_rendertexturecube(unsigned int texture, unsigned int format, int size);
+static unsigned int create_renderbuffer(unsigned int format, int width, int height);
 static int init_gbuffer(int width, int height);
 static int init_ssao(int width, int height);
 static int init_blit();
@@ -744,7 +748,7 @@ void kl_gl3_pass_pointlight(kl_array_t *lights) {
     kl_mat4f_mul(&modelmatrix, &translation, &scale);
   
     /* draw shadows -- this clobbers the GL state */
-    kl_gl3_pass_pointshadow(&light->position);
+    kl_gl3_pass_pointshadow(light);
 
     /* setup lighting pass */
     glEnable(GL_STENCIL_TEST);
@@ -1226,6 +1230,51 @@ static int create_program(char *name, unsigned int vshader, unsigned int gshader
   return 0;
 }
 
+static unsigned int create_rendertexture(unsigned int target, bool filter, bool swizzle) {
+  unsigned int texture;
+  glGenTextures(1, &texture);
+  glBindTexture(target, texture);
+  if (filter) {
+    glTexParameteri(target, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  } else {
+    glTexParameteri(target, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(target, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  }
+  glTexParameteri(target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  if (swizzle) {
+    glTexParameteri(target, GL_TEXTURE_SWIZZLE_R, GL_RED);
+    glTexParameteri(target, GL_TEXTURE_SWIZZLE_G, GL_RED);
+    glTexParameteri(target, GL_TEXTURE_SWIZZLE_B, GL_RED);
+  }
+  glBindTexture(target, 0);
+  return texture;
+}
+
+static void initialize_rendertexture(unsigned int texture, unsigned int target, unsigned int format, int width, int height) {
+  glBindTexture(target, texture);
+  glTexImage2D(target, 0, format, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+  glBindTexture(target, 0);
+}
+
+static void initialize_rendertexturecube(unsigned int texture, unsigned int format, int size) {
+  glBindTexture(GL_TEXTURE_CUBE_MAP, texture);
+  for (int i=0; i < 6; i++) {
+    glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, format, size, size, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+  }
+  glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
+}
+
+static unsigned int create_renderbuffer(unsigned int format, int width, int height) {
+  unsigned int renderbuffer;
+  glGenRenderbuffers(1, &renderbuffer);
+  glBindRenderbuffer(GL_RENDERBUFFER, renderbuffer);
+  glRenderbufferStorage(GL_RENDERBUFFER, format, width, height);
+  glBindRenderbuffer(GL_RENDERBUFFER, 0);
+  return renderbuffer;
+}
+
 static int init_gbuffer(int width, int height) {
   /* g-buffer format: */
   /* depth: 32f */
@@ -1234,71 +1283,32 @@ static int init_gbuffer(int width, int height) {
   /* diffuse: 8 red, 8 blue, 8 green, 8 unused */
   /* specular: 8 intensity, 8 exponent, 8 fresnel coeff (perpendicular reflectance), 8 unused */
   /* emissive: 8 red, 8 blue, 8 green, 8 intensity exponent */
-  
-  glGenTextures(MAXSSAOLEVELS, gbuffer_tex_depth);
-  glGenTextures(MAXSSAOLEVELS, gbuffer_tex_back);
-  glGenTextures(1, &gbuffer_tex_normal);
-  glGenTextures(1, &gbuffer_tex_diffuse);
-  glGenTextures(1, &gbuffer_tex_specular);
-  glGenTextures(1, &gbuffer_tex_emissive);
 
   int w = width;
   int h = height;
   for (int i=0; i < MAXSSAOLEVELS; i++) {
-    glBindTexture(GL_TEXTURE_RECTANGLE, gbuffer_tex_depth[i]);
-    glTexImage2D(GL_TEXTURE_RECTANGLE, 0, GL_RG16F, w, h, 0, GL_RED, GL_FLOAT, NULL);
-    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_SWIZZLE_R, GL_RED);
-    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_SWIZZLE_G, GL_RED);
-    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_SWIZZLE_B, GL_RED);
+    unsigned int texture;
+
+    texture = create_rendertexture(GL_TEXTURE_RECTANGLE, true, true);
+    initialize_rendertexture(texture, GL_TEXTURE_RECTANGLE, GL_R32F, w, h);
+    gbuffer_tex_depth[i] = texture;
     
-    glBindTexture(GL_TEXTURE_RECTANGLE, gbuffer_tex_back[i]);
-    glTexImage2D(GL_TEXTURE_RECTANGLE, 0, GL_RG16F, w, h, 0, GL_RED, GL_FLOAT, NULL);
-    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_SWIZZLE_R, GL_RED);
-    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_SWIZZLE_G, GL_RED);
-    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_SWIZZLE_B, GL_RED);
+    texture = create_rendertexture(GL_TEXTURE_RECTANGLE, true, true);
+    initialize_rendertexture(texture, GL_TEXTURE_RECTANGLE, GL_R32F, w, h);
+    gbuffer_tex_back[i] = texture;
 
     w >>= 1;
     h >>= 1;
   }
 
-  glBindTexture(GL_TEXTURE_RECTANGLE, gbuffer_tex_normal);
-  glTexImage2D(GL_TEXTURE_RECTANGLE, 0, GL_RG16, width, height, 0, GL_RG, GL_UNSIGNED_SHORT, NULL);
-  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-  glBindTexture(GL_TEXTURE_RECTANGLE, gbuffer_tex_diffuse);
-  glTexImage2D(GL_TEXTURE_RECTANGLE, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
-  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-  glBindTexture(GL_TEXTURE_RECTANGLE, gbuffer_tex_specular);
-  glTexImage2D(GL_TEXTURE_RECTANGLE, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
-  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-  glBindTexture(GL_TEXTURE_RECTANGLE, gbuffer_tex_emissive);
-  glTexImage2D(GL_TEXTURE_RECTANGLE, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
-  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-  glBindTexture(GL_TEXTURE_RECTANGLE, 0);
-
+  gbuffer_tex_normal   = create_rendertexture(GL_TEXTURE_RECTANGLE, false, false);
+  gbuffer_tex_diffuse  = create_rendertexture(GL_TEXTURE_RECTANGLE, false, false);
+  gbuffer_tex_specular = create_rendertexture(GL_TEXTURE_RECTANGLE, false, false);
+  gbuffer_tex_emissive = create_rendertexture(GL_TEXTURE_RECTANGLE, false, false);
+  initialize_rendertexture(gbuffer_tex_normal,   GL_TEXTURE_RECTANGLE, GL_RG16,  width, height);
+  initialize_rendertexture(gbuffer_tex_diffuse,  GL_TEXTURE_RECTANGLE, GL_RGBA8, width, height);
+  initialize_rendertexture(gbuffer_tex_specular, GL_TEXTURE_RECTANGLE, GL_RGBA8, width, height);
+  initialize_rendertexture(gbuffer_tex_emissive, GL_TEXTURE_RECTANGLE, GL_RGBA8, width, height);
  
   glGenFramebuffers(1, &gbuffer_fbo_front);
   glGenFramebuffers(1, &gbuffer_fbo_back);
@@ -1306,8 +1316,8 @@ static int init_gbuffer(int width, int height) {
 
   glBindFramebuffer(GL_FRAMEBUFFER, gbuffer_fbo_front);
   glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_RECTANGLE, gbuffer_tex_depth[0], 0);
-  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_RECTANGLE, gbuffer_tex_normal, 0);
-  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_TEXTURE_RECTANGLE, gbuffer_tex_diffuse, 0);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_RECTANGLE, gbuffer_tex_normal,   0);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_TEXTURE_RECTANGLE, gbuffer_tex_diffuse,  0);
   glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT3, GL_TEXTURE_RECTANGLE, gbuffer_tex_specular, 0);
   glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT4, GL_TEXTURE_RECTANGLE, gbuffer_tex_emissive, 0);
   glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, rbo_depth);
@@ -1380,27 +1390,16 @@ static int init_ssao(int width, int height) {
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
   glBindTexture(GL_TEXTURE_2D, 0);
   
-
-  glGenTextures(6, ssao_tex_occlusion);
-
   int w = width;
   int h = height;
   for (int i=0; i < 6; i++) {
-    glBindTexture(GL_TEXTURE_RECTANGLE, ssao_tex_occlusion[i]);
-    glTexImage2D(GL_TEXTURE_RECTANGLE, 0, GL_R8, w, h, 0, GL_RED, GL_UNSIGNED_BYTE, NULL);
-    //glTexImage2D(GL_TEXTURE_RECTANGLE, 0, GL_R16F, w, h, 0, GL_RED, GL_FLOAT, NULL);
-    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_SWIZZLE_R, GL_RED);
-    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_SWIZZLE_G, GL_RED);
-    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_SWIZZLE_B, GL_RED);
+    unsigned int texture = create_rendertexture(GL_TEXTURE_RECTANGLE, true, true);
+    initialize_rendertexture(texture, GL_TEXTURE_RECTANGLE, GL_R8, w, h);
+    ssao_tex_occlusion[i] = texture;
 
     w >>= 1;
     h >>= 1;
   }
-  glBindTexture(GL_TEXTURE_RECTANGLE, 0);
 
   glGenFramebuffers(6, ssao_fbo);
   for (int i=0; i<6; i++) {
@@ -1486,14 +1485,8 @@ static int init_minimal() {
 }
 
 static int init_lighting(int width, int height) {
-  glGenTextures(1, &tex_lighting);
-  glBindTexture(GL_TEXTURE_2D, tex_lighting);
-  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, NULL);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-  glBindTexture(GL_TEXTURE_2D, 0);
+  tex_lighting = create_rendertexture(GL_TEXTURE_2D, true, false);
+  initialize_rendertexture(tex_lighting, GL_TEXTURE_2D, GL_RGBA16F, width, height);
 
   glGenFramebuffers(1, &fbo_lighting);
   glBindFramebuffer(GL_FRAMEBUFFER, fbo_lighting);
@@ -1506,17 +1499,8 @@ static int init_lighting(int width, int height) {
   }
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
   
-  glGenTextures(1, &tex_shadow);
-  glBindTexture(GL_TEXTURE_RECTANGLE, tex_shadow);
-  glTexImage2D(GL_TEXTURE_RECTANGLE, 0, GL_R8, width, height, 0, GL_RED, GL_UNSIGNED_BYTE, NULL);
-  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_SWIZZLE_R, GL_RED);
-  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_SWIZZLE_G, GL_RED);
-  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_SWIZZLE_B, GL_RED);
-  glBindTexture(GL_TEXTURE_RECTANGLE, 0);
+  tex_shadow = create_rendertexture(GL_TEXTURE_RECTANGLE, true, true);
+  initialize_rendertexture(tex_shadow, GL_TEXTURE_RECTANGLE, GL_R8, width, height);
 
   glGenFramebuffers(1, &fbo_shadow);
   glBindFramebuffer(GL_FRAMEBUFFER, fbo_shadow);
@@ -1528,17 +1512,8 @@ static int init_lighting(int width, int height) {
     return -1;
   }
   
-  glGenTextures(1, &shadowfilter_tex_shadow);
-  glBindTexture(GL_TEXTURE_RECTANGLE, shadowfilter_tex_shadow);
-  glTexImage2D(GL_TEXTURE_RECTANGLE, 0, GL_R8, width, height, 0, GL_RED, GL_UNSIGNED_BYTE, NULL);
-  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_SWIZZLE_R, GL_RED);
-  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_SWIZZLE_G, GL_RED);
-  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_SWIZZLE_B, GL_RED);
-  glBindTexture(GL_TEXTURE_RECTANGLE, 0);
+  shadowfilter_tex_shadow = create_rendertexture(GL_TEXTURE_RECTANGLE, true, true);
+  initialize_rendertexture(shadowfilter_tex_shadow, GL_TEXTURE_RECTANGLE, GL_R8, width, height);
 
   glGenFramebuffers(1, &shadowfilter_fbo);
   glBindFramebuffer(GL_FRAMEBUFFER, shadowfilter_fbo);
@@ -1552,26 +1527,9 @@ static int init_lighting(int width, int height) {
   
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
   
-  glGenTextures(1, &cubedepth_tex_shadow);
-  glBindTexture(GL_TEXTURE_CUBE_MAP, cubedepth_tex_shadow);
-  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
-  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_SWIZZLE_R, GL_RED);
-  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_SWIZZLE_G, GL_RED);
-  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_SWIZZLE_B, GL_RED);
-  for (int i=0; i < 6; i++) {
-    glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, GL_R32F, shadowsize, shadowsize, 0, GL_RED, GL_FLOAT, NULL);
-  }
-  
-  glGenRenderbuffers(1, &cubedepth_rbo_depth);
-  glBindRenderbuffer(GL_RENDERBUFFER, cubedepth_rbo_depth);
-  glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT32, shadowsize, shadowsize);
-  glBindRenderbuffer(GL_RENDERBUFFER, 0);
-  
-  glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
+  cubedepth_tex_shadow = create_rendertexture(GL_TEXTURE_CUBE_MAP, true, true);
+  initialize_rendertexturecube(cubedepth_tex_shadow, GL_R32F, shadowsize);
+  cubedepth_rbo_depth  = create_renderbuffer(GL_DEPTH_COMPONENT32, shadowsize, shadowsize);
 
   glGenFramebuffers(6, cubedepth_fbo);
   for (int i=0; i < 6; i++) {
@@ -1592,45 +1550,14 @@ static int init_lighting(int width, int height) {
   /* color:    32f R, 32f G, 32f B, 32f falloff (used to re-normalize VPL intensities) */
   /* high-resolution formats can be used because bounce maps will be very low resolution */
   
-  glGenTextures(1, &pointbounce_tex_position);
-  glBindTexture(GL_TEXTURE_CUBE_MAP, pointbounce_tex_position);
-  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
-  for (int i=0; i < 6; i++) {
-    glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, GL_RGBA32F, bouncemapsize, bouncemapsize, 0, GL_RGBA, GL_FLOAT, NULL);
-  }
+  pointbounce_tex_position = create_rendertexture(GL_TEXTURE_CUBE_MAP, false, false);
+  pointbounce_tex_normal   = create_rendertexture(GL_TEXTURE_CUBE_MAP, false, false);
+  pointbounce_tex_color    = create_rendertexture(GL_TEXTURE_CUBE_MAP, false, false);
+  initialize_rendertexturecube(pointbounce_tex_position, GL_RGBA32F, bouncemapsize);
+  initialize_rendertexturecube(pointbounce_tex_normal,   GL_RGBA32F, bouncemapsize);
+  initialize_rendertexturecube(pointbounce_tex_color,    GL_RGBA32F, bouncemapsize);
   
-  glGenTextures(1, &pointbounce_tex_color);
-  glBindTexture(GL_TEXTURE_CUBE_MAP, pointbounce_tex_color);
-  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
-  for (int i=0; i < 6; i++) {
-    glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, GL_RGBA32F, bouncemapsize, bouncemapsize, 0, GL_RGBA, GL_FLOAT, NULL);
-  }
-  
-  glGenTextures(1, &pointbounce_tex_normal);
-  glBindTexture(GL_TEXTURE_CUBE_MAP, pointbounce_tex_normal);
-  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
-  for (int i=0; i < 6; i++) {
-    glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, GL_RGBA32F, bouncemapsize, bouncemapsize, 0, GL_RGBA, GL_FLOAT, NULL);
-  }
-  
-  glGenRenderbuffers(1, &pointbounce_rbo_depth);
-  glBindRenderbuffer(GL_RENDERBUFFER, pointbounce_rbo_depth);
-  glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT32, bouncemapsize, bouncemapsize);
-  glBindRenderbuffer(GL_RENDERBUFFER, 0);
-  
-  glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
+  pointbounce_rbo_depth = create_renderbuffer(GL_DEPTH_COMPONENT32, bouncemapsize, bouncemapsize);
 
   glGenFramebuffers(6, pointbounce_fbo);
   for (int i=0; i < 6; i++) {
