@@ -441,7 +441,7 @@ DEF_NORMAL_ENCODING
 "  color.rgb += spec_intensity * fresnel * pow(max(0.0, dot(R, V)), spec_exponent);\n" /* specular */
 "  color.rgb *= light.color.rgb * light.color.a;\n" /* diffuse/specular scale */
 "  color.rgb += diff * light.ambient.rgb * light.ambient.a * occlusion;\n" /* ambient */
-"  color.rgb += glow.rgb * exp2(glow.a * 16.0 - 8.0);\n" /* emissive */
+"  color.rgb += glow.rgb * exp2(glow.a * 64.0 - 32.0);\n" /* emissive */
 "  color.a    = 1.0;\n"
 "}\n";
 
