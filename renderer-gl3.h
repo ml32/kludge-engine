@@ -16,7 +16,7 @@ void kl_gl3_pass_gbuffer(kl_array_t *models);
 void kl_gl3_pass_envlight();
 void kl_gl3_pass_pointlight(kl_array_t *models);
 
-void kl_gl3_pass_pointshadow(kl_vec3f_t *center);
+void kl_gl3_pass_pointshadow(kl_light_t *light);
 void kl_gl3_pass_pointshadow_face(int face, kl_array_t *models);
 
 /* displays bounding volumes */

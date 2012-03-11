@@ -24,6 +24,7 @@
 static const float anisotropy = 4.0f;
 static const int   mipbias = 0;
 static const int   shadowsize = 512;
+static const int   bouncemapsize = 32;
 static const int   ssaolevels = 5;
 #define MAXSSAOLEVELS 6
 
@@ -48,6 +49,20 @@ static unsigned int fbo_shadow;
 static unsigned int ubo_envlight;
 static unsigned int ubo_scene;
 static unsigned int tex_noise;
+
+/* first-bounce VPL generation for omnidirecitonal source */
+static unsigned int pointbounce_fshader;
+static unsigned int pointbounce_vshader;
+static unsigned int pointbounce_program;
+static int pointbounce_uniform_tdiffuse;
+static int pointbounce_uniform_tnormal;
+static int pointbounce_uniform_cubeproj;
+static int pointbounce_uniform_face;
+static unsigned int pointbounce_tex_position;
+static unsigned int pointbounce_tex_color;
+static unsigned int pointbounce_tex_normal;
+static unsigned int pointbounce_rbo_depth;
+static unsigned int pointbounce_fbo[6];
 
 static unsigned int gbuffer_fshader;
 static unsigned int gbuffer_vshader;
@@ -518,14 +533,14 @@ void kl_gl3_pass_gbuffer(kl_array_t *models) {
   glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
 }
 
-void kl_gl3_pass_pointshadow(kl_vec3f_t *center) {
+void kl_gl3_pass_pointshadow(kl_light_t *light) {
   //glEnable(GL_CULL_FACE);
   //glCullFace(GL_FRONT);
   glEnable(GL_DEPTH_TEST);
   glDepthFunc(GL_LEQUAL);
   
   glUseProgram(cubedepth_program);
-  glUniform3f(cubedepth_uniform_center, center->x, center->y, center->z);
+  glUniform3f(cubedepth_uniform_center, light->position.x, light->position.y, light->position.z);
   
   kl_array_t models;
   kl_array_init(&models, sizeof(kl_model_t*));
@@ -555,7 +570,7 @@ void kl_gl3_pass_pointshadow(kl_vec3f_t *center) {
   
   glUniform1i(pointshadow_uniform_tscreendepth, 0);
   glUniform1i(pointshadow_uniform_tcubedepth, 1);
-  glUniform3f(pointshadow_uniform_center, center->x, center->y, center->z);
+  glUniform3f(pointshadow_uniform_center, light->position.x, light->position.y, light->position.z);
   
   glActiveTexture(GL_TEXTURE0);
   glBindTexture(GL_TEXTURE_RECTANGLE, gbuffer_tex_depth[0]);
@@ -1553,7 +1568,7 @@ static int init_lighting(int width, int height) {
   
   glGenRenderbuffers(1, &cubedepth_rbo_depth);
   glBindRenderbuffer(GL_RENDERBUFFER, cubedepth_rbo_depth);
-  glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, shadowsize, shadowsize);
+  glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT32, shadowsize, shadowsize);
   glBindRenderbuffer(GL_RENDERBUFFER, 0);
   
   glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
@@ -1563,6 +1578,67 @@ static int init_lighting(int width, int height) {
     glBindFramebuffer(GL_FRAMEBUFFER, cubedepth_fbo[i]);
     glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, cubedepth_rbo_depth);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, cubedepth_tex_shadow, 0);
+    status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    if (status != GL_FRAMEBUFFER_COMPLETE) {
+      fprintf(stderr, "Render: Point light shadow mapping framebuffer is incomplete.\n\tDetails: %x\n", status);
+      return -1;
+    }
+  }
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  
+  /* bounce format: */
+  /* position: 32f X, 32f Y, 32f Z, 32f unused */
+  /* normal:   32f X, 32f Y, 32f Z, 32f unused */
+  /* color:    32f R, 32f G, 32f B, 32f falloff (used to re-normalize VPL intensities) */
+  /* high-resolution formats can be used because bounce maps will be very low resolution */
+  
+  glGenTextures(1, &pointbounce_tex_position);
+  glBindTexture(GL_TEXTURE_CUBE_MAP, pointbounce_tex_position);
+  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+  for (int i=0; i < 6; i++) {
+    glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, GL_RGBA32F, bouncemapsize, bouncemapsize, 0, GL_RGBA, GL_FLOAT, NULL);
+  }
+  
+  glGenTextures(1, &pointbounce_tex_color);
+  glBindTexture(GL_TEXTURE_CUBE_MAP, pointbounce_tex_color);
+  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+  for (int i=0; i < 6; i++) {
+    glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, GL_RGBA32F, bouncemapsize, bouncemapsize, 0, GL_RGBA, GL_FLOAT, NULL);
+  }
+  
+  glGenTextures(1, &pointbounce_tex_normal);
+  glBindTexture(GL_TEXTURE_CUBE_MAP, pointbounce_tex_normal);
+  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+  for (int i=0; i < 6; i++) {
+    glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, GL_RGBA32F, bouncemapsize, bouncemapsize, 0, GL_RGBA, GL_FLOAT, NULL);
+  }
+  
+  glGenRenderbuffers(1, &pointbounce_rbo_depth);
+  glBindRenderbuffer(GL_RENDERBUFFER, pointbounce_rbo_depth);
+  glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT32, bouncemapsize, bouncemapsize);
+  glBindRenderbuffer(GL_RENDERBUFFER, 0);
+  
+  glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
+
+  glGenFramebuffers(6, pointbounce_fbo);
+  for (int i=0; i < 6; i++) {
+    glBindFramebuffer(GL_FRAMEBUFFER, pointbounce_fbo[i]);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, pointbounce_rbo_depth);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, pointbounce_tex_position, 0);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, pointbounce_tex_normal, 0);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, pointbounce_tex_color, 0);
     status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
     if (status != GL_FRAMEBUFFER_COMPLETE) {
       fprintf(stderr, "Render: Point light shadow mapping framebuffer is incomplete.\n\tDetails: %x\n", status);
@@ -1620,7 +1696,7 @@ static int init_lighting(int width, int height) {
   if (create_shader("point-light shadow fragment shader", GL_FRAGMENT_SHADER, fshader_pointshadow_src, &pointshadow_fshader) < 0) return -1;
   if (create_program("point-light shadow shader program", pointshadow_vshader, 0, pointshadow_fshader, &pointshadow_program) < 0) return -1;
   
-  bind_ubo(pointlight_program, "scene", 0);
+  bind_ubo(pointshadow_program, "scene", 0);
   pointshadow_uniform_tscreendepth = glGetUniformLocation(pointshadow_program, "tscreendepth");
   pointshadow_uniform_tcubedepth   = glGetUniformLocation(pointshadow_program, "tcubedepth");
   pointshadow_uniform_center       = glGetUniformLocation(pointshadow_program, "center");
@@ -1633,6 +1709,16 @@ static int init_lighting(int width, int height) {
   shadowfilter_uniform_tnormal = glGetUniformLocation(shadowfilter_program, "tnormal");
   shadowfilter_uniform_tshadow = glGetUniformLocation(shadowfilter_program, "tshadow");
   shadowfilter_uniform_pass    = glGetUniformLocation(shadowfilter_program, "pass");
+  
+  if (create_shader("point-light bounce vertex shader", GL_VERTEX_SHADER, vshader_pointbounce_src, &pointbounce_vshader) < 0) return -1;
+  if (create_shader("point-light bounce fragment shader", GL_FRAGMENT_SHADER, fshader_pointbounce_src, &pointbounce_fshader) < 0) return -1;
+  if (create_program("point-light bounce shader program", pointbounce_vshader, 0, pointbounce_fshader, &pointbounce_program) < 0) return -1;
+  
+  bind_ubo(pointbounce_program, "pointlight", 0);
+  pointbounce_uniform_tdiffuse = glGetUniformLocation(pointbounce_program, "tdiffuse");
+  pointbounce_uniform_tnormal  = glGetUniformLocation(pointbounce_program, "tnormal");
+  pointbounce_uniform_cubeproj = glGetUniformLocation(pointbounce_program, "cubeproj");
+  pointbounce_uniform_face     = glGetUniformLocation(pointbounce_program, "face");
 
   /* environmental lighting */
   if (create_shader("environmental lighting vertex shader", GL_VERTEX_SHADER, vshader_envlight_src, &envlight_vshader) < 0) return -1;
