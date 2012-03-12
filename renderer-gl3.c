@@ -23,8 +23,8 @@
 
 static const float anisotropy = 4.0f;
 static const int   mipbias = 0;
-static const int   shadowsize = 512;
-static const int   bouncemapsize = 8;
+static const int   shadowsize = 1024;
+static const int   bouncemapsize = 4;
 static const int   ssaolevels = 5;
 #define MAXSSAOLEVELS 6
 
@@ -77,6 +77,7 @@ static unsigned int surfacelight_program;
 static int surfacelight_uniform_tdepth;
 static int surfacelight_uniform_tdiffuse;
 static int surfacelight_uniform_tnormal;
+static int surfacelight_uniform_tocclusion;
 static int surfacelight_uniform_position;
 static int surfacelight_uniform_direction;
 static int surfacelight_uniform_radiosity;
@@ -612,6 +613,63 @@ void kl_gl3_pass_pointshadow(kl_light_t *light) {
 }
 
 void kl_gl3_pass_surfacelight(kl_vec4f_t *position, kl_vec4f_t *normal, kl_vec4f_t *radiosity) {
+  kl_vec3f_t offset = (kl_vec3f_t){ .x = position->x, .y = position->y, .z = position->z };
+
+  float r = radiosity->x;
+  float g = radiosity->y;
+  float b = radiosity->z;
+  float radius = 64.0f * sqrtf(r > g ? (r > b ? r : b) : (g > b ? g : b));
+  
+  kl_mat4f_t scale, translation, modelmatrix;
+  kl_mat4f_translation(&translation, &offset);
+  kl_mat4f_scale(&scale, radius, radius, radius);
+  kl_mat4f_mul(&modelmatrix, &translation, &scale);
+    
+    
+  glEnable(GL_STENCIL_TEST);
+  
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbo_lighting);
+  unsigned int attachments[] = {GL_COLOR_ATTACHMENT0};
+  glDrawBuffers(1, attachments);
+
+  glClear(GL_STENCIL_BUFFER_BIT);
+
+  /* stencil pass */
+  glUseProgram(minimal_program);
+
+  glBindBufferBase(GL_UNIFORM_BUFFER, 0, ubo_scene);
+  
+  glUniformMatrix4fv(minimal_uniform_modelmatrix, 1, GL_FALSE, (float*)&modelmatrix);
+
+  glDepthMask(GL_FALSE); /* disable depth writes */
+  glEnable(GL_DEPTH_TEST);
+  glEnable(GL_CULL_FACE);
+  glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+  
+  glCullFace(GL_FRONT);
+  glDepthFunc(GL_GREATER);
+  glStencilFunc(GL_ALWAYS, 0, 0xFF);
+  glStencilOp(GL_KEEP, GL_KEEP, GL_INCR);
+
+  glBindVertexArray(vao_sphere);
+  glDrawElements(GL_TRIANGLES, SPHERE_NUMTRIS * 3, GL_UNSIGNED_INT, 0);
+  
+  glCullFace(GL_BACK);
+  glDepthFunc(GL_GREATER);
+  glStencilFunc(GL_ALWAYS, 0, 0xFF);
+  glStencilOp(GL_KEEP, GL_KEEP, GL_ZERO);
+
+  glBindVertexArray(vao_sphere);
+  glDrawElements(GL_TRIANGLES, SPHERE_NUMTRIS * 3, GL_UNSIGNED_INT, 0);
+
+  glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+  glCullFace(GL_BACK);
+  glDisable(GL_CULL_FACE);
+  glDisable(GL_DEPTH_TEST);
+  glDepthMask(GL_TRUE);
+  
+  
+  /* lighting pass */
   glUseProgram(surfacelight_program);
 
   glBindBufferBase(GL_UNIFORM_BUFFER, 0, ubo_scene);
@@ -619,26 +677,31 @@ void kl_gl3_pass_surfacelight(kl_vec4f_t *position, kl_vec4f_t *normal, kl_vec4f
   glUniform1i(surfacelight_uniform_tdepth, 0);
   glUniform1i(surfacelight_uniform_tnormal, 1);
   glUniform1i(surfacelight_uniform_tdiffuse, 2);
+  glUniform1i(surfacelight_uniform_tocclusion, 3);
   glUniform3f(surfacelight_uniform_position, position->x, position->y, position->z);
   glUniform3f(surfacelight_uniform_direction, normal->x, normal->y, normal->z);
   glUniform3f(surfacelight_uniform_radiosity, radiosity->x, radiosity->y, radiosity->z);
   
-  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbo_lighting);
-  unsigned int attachments[] = {GL_COLOR_ATTACHMENT0};
-  glDrawBuffers(1, attachments);
-  
   set_texture(0, gbuffer_tex_depth[0], GL_TEXTURE_RECTANGLE);
   set_texture(1, gbuffer_tex_normal,   GL_TEXTURE_RECTANGLE);
   set_texture(2, gbuffer_tex_diffuse,  GL_TEXTURE_RECTANGLE);
+  set_texture(3, ssao_tex_occlusion,  GL_TEXTURE_RECTANGLE);
 
+  glStencilMask(0x00);
+  glStencilFunc(GL_NOTEQUAL, 0, 0xFF);
+  glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+  
   glEnable(GL_BLEND);
   glBlendFunc(GL_ONE, GL_ONE); /* additive blending */
   draw_pquad();
   glDisable(GL_BLEND);
-  
-  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
 
   glUseProgram(0);
+  
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+  
+  glStencilMask(0xFF);
+  glDisable(GL_STENCIL_TEST);
 }
 
 void kl_gl3_pass_pointshadow_face(int face, kl_array_t *models) {
@@ -845,18 +908,26 @@ void kl_gl3_pass_pointlight(kl_array_t *lights) {
 
     glDepthMask(GL_FALSE); /* disable depth writes */
     glEnable(GL_DEPTH_TEST);
-    glDepthFunc(GL_GREATER);
     glEnable(GL_CULL_FACE);
-    glCullFace(GL_FRONT);
     glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+    
+    glCullFace(GL_FRONT);
+    glDepthFunc(GL_GREATER);
     glStencilFunc(GL_ALWAYS, 0, 0xFF);
-    glStencilOp(GL_KEEP, GL_KEEP, GL_INVERT);
+    glStencilOp(GL_KEEP, GL_KEEP, GL_INCR);
+
+    glBindVertexArray(vao_sphere);
+    glDrawElements(GL_TRIANGLES, SPHERE_NUMTRIS * 3, GL_UNSIGNED_INT, 0);
+  
+    glCullFace(GL_BACK);
+    glDepthFunc(GL_GREATER);
+    glStencilFunc(GL_ALWAYS, 0, 0xFF);
+    glStencilOp(GL_KEEP, GL_KEEP, GL_ZERO);
 
     glBindVertexArray(vao_sphere);
     glDrawElements(GL_TRIANGLES, SPHERE_NUMTRIS * 3, GL_UNSIGNED_INT, 0);
 
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-    
     glCullFace(GL_BACK);
     glDisable(GL_CULL_FACE);
     glDisable(GL_DEPTH_TEST);
@@ -963,8 +1034,8 @@ void kl_gl3_composite(float dt) {
   
   /* determine half-brightness level */
   const float lambda   = 1.0f; /* rate of decay */
-  const float exposure = 1.0f / 8.0f;
-  const float minsigma = 0.10f; /* the minimum light level that the viewer can adapt to */
+  const float exposure = 1.0f / 7.0f;
+  const float minsigma = 0.25f; /* the minimum light level that the viewer can adapt to */
   float decay = exp(-lambda * dt);
   luminance = decay * luminance + (1.0f - decay) * mean;
   float sigma = luminance / exposure;
@@ -1764,6 +1835,7 @@ static int init_lighting(int width, int height) {
   surfacelight_uniform_tdepth = glGetUniformLocation(surfacelight_program, "tdepth");
   surfacelight_uniform_tdiffuse = glGetUniformLocation(surfacelight_program, "tdiffuse");
   surfacelight_uniform_tnormal = glGetUniformLocation(surfacelight_program, "tnormal");
+  surfacelight_uniform_tocclusion = glGetUniformLocation(surfacelight_program, "tocclusion");
   surfacelight_uniform_position = glGetUniformLocation(surfacelight_program, "position");
   surfacelight_uniform_direction = glGetUniformLocation(surfacelight_program, "direction");
   surfacelight_uniform_radiosity = glGetUniformLocation(surfacelight_program, "radiosity");
