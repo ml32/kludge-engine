@@ -293,7 +293,7 @@ DEF_NORMAL_ENCODING
 "  float total = 0.0;\n"
 "  float value = 0.0;\n"
 "  for (int i=0; i < 7; i++) {\n"
-"      float scale = min(1000.0 / depth, 4.0);\n"
+"      float scale = min(2000.0 / depth, 3.0);\n"
 "      vec2 offset = scale * axis * (i - 3);\n"
 "      vec2 texcoord = gl_FragCoord.xy + offset;\n"
 "      float sample_depth = texture(tdepth, texcoord).r;\n"
@@ -384,6 +384,52 @@ DEF_NORMAL_ENCODING
 "  color.rgb += spec_intensity * fresnel * pow(max(0.0, dot(R, V)), spec_exponent);\n" /* specular */
 "  color.rgb *= light.color.rgb * irradiance * shadow;\n"
 "  color.a    = 1.0;\n"
+"}\n";
+
+static const char *vshader_surfacelight_src = 
+"#version 330\n"
+DEF_BLOCK_SCENE
+"uniform vec3 position;\n"
+"uniform vec3 direction;\n"
+"layout(location = 0) in vec2 vcoord;\n"
+"layout(location = 1) in vec3 vray_eye;\n"
+"layout(location = 2) in vec3 vray_world;\n"
+"smooth out vec3 fray_eye;\n"
+"smooth out vec3 fcenter_eye;\n"
+"smooth out vec3 fdir_eye;\n"
+"void main () {\n"
+"  fray_eye = vray_eye;\n"
+"  fcenter_eye = (viewmatrix * vec4(position, 1.0)).xyz;\n"
+"  fdir_eye = viewrot * direction;\n"
+"  gl_Position = vec4(vcoord, 0.0, 1.0);\n"
+"}\n";
+
+static const char *fshader_surfacelight_src =
+"#version 330\n"
+"uniform sampler2DRect tdepth;\n"
+"uniform sampler2DRect tnormal;\n"
+"uniform sampler2DRect tdiffuse;\n"
+"uniform vec3 radiosity;\n"
+"smooth in vec3 fray_eye;\n"
+"smooth in vec3 fcenter_eye;\n"
+"smooth in vec3 fdir_eye;\n"
+"layout(location = 0) out vec4 color;\n"
+DEF_NORMAL_ENCODING
+"void main () {\n"
+"  float depth = texture(tdepth, gl_FragCoord.xy).r;\n"
+"  vec3  coord_eye = fray_eye * depth;\n"
+"  float dist = distance(fcenter_eye, coord_eye);\n"
+"  const float multiplier = 4.0;\n"
+"  const float bias = 16.0;\n"
+"  float falloff = multiplier / (bias + dist * dist);\n"
+""
+"  vec3 N = decode_normal(texture(tnormal, gl_FragCoord.xy).xy);\n"
+"  vec3 L = normalize(fcenter_eye - coord_eye);\n"
+"  vec3 irradiance = radiosity * max(0.0, dot(fdir_eye, -L)) * falloff;\n"
+""
+"  vec4 diff = texture(tdiffuse, gl_FragCoord.xy);\n"
+"  color.rgb = diff.rgb * max(0.0, dot(N, L)) * irradiance;\n"
+"  color.a   = falloff;\n"
 "}\n";
 
 static const char *vshader_envlight_src = 
@@ -512,23 +558,23 @@ static const char *fshader_pointbounce_src =
 "smooth in mat3 tbnmatrix;\n"
 "layout(location = 0) out vec4 position;\n"
 "layout(location = 1) out vec4 normal;\n"
-"layout(location = 2) out vec4 color;\n"
+"layout(location = 2) out vec4 radiosity;\n"
 "void main() {\n"
 "  vec4 diff = texture(tdiffuse, ftexcoord);\n"
 "  if (diff.a < 0.5) discard;\n"
 ""
 "  float dist = distance(fposition, light.position.xyz);\n"
 "  float falloff = 1.0 / (dist * dist);\n"
-"  float irradiance = light.color.a / falloff;\n"
+"  float irradiance = light.color.a * falloff;\n"
 ""
 "  vec3 N_tangent = texture(tnormal, ftexcoord).xyz * 2.0 - 1.0;\n"
 "  vec3 N = normalize(tbnmatrix * N_tangent);\n"
-"  vec3 L = normalize(fposition - light.position.xyz);\n"
+"  vec3 L = normalize(light.position.xyz - fposition);\n"
 ""
 "  position  = vec4(fposition, 1.0);\n"
 "  normal    = vec4(N, 1.0);\n"
-"  color.rgb = diff.rgb * max(0.0, dot(N, L)) * irradiance;\n"
-"  color.a   = falloff;\n"
+"  radiosity.rgb = diff.rgb * max(0.0, dot(N, L)) * light.color.rgb * irradiance;\n"
+"  radiosity.a   = falloff;\n"
 "}\n";
 
 static const char *vshader_pointshadow_src = 

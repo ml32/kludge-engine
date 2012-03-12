@@ -48,7 +48,7 @@ int main(int argc, char **argv) {
   kl_vec3f_t light3_pos = { .x = 0.0f, .y = 300.0f, .z = 0.0f };
   kl_render_add_light(&light3_pos, 1.0f, 0.8f, 0.5f, 25000.0f);
   kl_vec3f_t envlight_dir = { -2.0f, -2.0f, 1.0f };
-  kl_render_set_envlight(&envlight_dir, 0.8f, 0.8f, 1.0f, 0.05f, 1.0f, 0.9f, 0.6f, 0.0f);
+  kl_render_set_envlight(&envlight_dir, 0.8f, 0.8f, 1.0f, 0.0f, 1.0f, 0.9f, 0.6f, 0.0f);
   
   kl_timer_t timer = KL_TIMER_INIT;
   
