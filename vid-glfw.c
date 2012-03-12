@@ -14,8 +14,8 @@ int kl_vid_init() {
   glfwOpenWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
   glfwOpenWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
   
-  //if (glfwOpenWindow(1280, 720, 8, 8, 8, 0, 24, 8, GLFW_WINDOW) < 0) {
-  if (glfwOpenWindow(1920, 1080, 8, 8, 8, 0, 24, 8, GLFW_FULLSCREEN) < 0) {
+  if (glfwOpenWindow(1280, 720, 8, 8, 8, 0, 24, 8, GLFW_WINDOW) < 0) {
+  //if (glfwOpenWindow(1920, 1080, 8, 8, 8, 0, 24, 8, GLFW_FULLSCREEN) < 0) {
     fprintf(stderr, "vid-glfw -> failed to create window\n");
     return -1;
   }

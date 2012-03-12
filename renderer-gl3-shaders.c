@@ -421,7 +421,7 @@ DEF_NORMAL_ENCODING
 "  vec3  coord_eye = fray_eye * depth;\n"
 "  float dist = distance(fcenter_eye, coord_eye);\n"
 "  const float multiplier = 8.0;\n"
-"  float falloff = min(multiplier / (32.0 * 32.0), multiplier / (dist * dist));\n"
+"  float falloff = min(1.0 / (32.0 * 32.0), multiplier / (dist * dist));\n"
 ""
 "  float occlusion = pow(1.0 - max(0.0, texture(tocclusion, gl_FragCoord.xy).r), 1.5);\n"
 ""
@@ -567,7 +567,8 @@ static const char *fshader_pointbounce_src =
 "  if (diff.a < 0.5) discard;\n"
 ""
 "  float dist = distance(fposition, light.position.xyz);\n"
-"  float falloff = 1.0 / (dist * dist);\n"
+//"  float falloff = 1.0 / (dist * dist);\n"
+"  float falloff = 1.0;\n"
 "  float irradiance = light.color.a * falloff;\n"
 ""
 "  vec3 N_tangent = texture(tnormal, ftexcoord).xyz * 2.0 - 1.0;\n"
@@ -576,7 +577,8 @@ static const char *fshader_pointbounce_src =
 ""
 "  position  = vec4(fposition, 1.0);\n"
 "  normal    = vec4(N, 1.0);\n"
-"  radiosity.rgb = diff.rgb * max(0.0, dot(N, L)) * light.color.rgb * irradiance;\n"
+//"  radiosity.rgb = diff.rgb * max(0.0, dot(N, L)) * light.color.rgb * irradiance;\n"
+"  radiosity.rgb = diff.rgb * light.color.rgb * irradiance;\n"
 "  radiosity.a   = falloff;\n"
 "}\n";
 
