@@ -23,8 +23,8 @@
 
 static const float anisotropy = 4.0f;
 static const int   mipbias = 0;
-static const int   shadowsize = 1024;
-static const int   bouncemapsize = 6;
+static const int   shadowsize = 512;
+static const int   bouncemapsize = 8;
 static const int   ssaolevels = 5;
 #define MAXSSAOLEVELS 6
 
@@ -56,6 +56,9 @@ static unsigned int fbo_shadow;
 static unsigned int ubo_envlight;
 static unsigned int ubo_scene;
 static unsigned int tex_noise;
+static unsigned int rbo_halfdepth; /* half-resolution depth buffer */
+static unsigned int tex_halflighting;
+static unsigned int fbo_halflighting;
 
 /* first-bounce VPL generation for omnidirecitonal source */
 static unsigned int pointbounce_fshader;
@@ -70,6 +73,7 @@ static unsigned int pointbounce_tex_radiosity;
 static unsigned int pointbounce_tex_normal;
 static unsigned int pointbounce_rbo_depth;
 static unsigned int pointbounce_fbo[6];
+static bool *pointbounce_mask; /* used to correct for perspective distortion when choosing VPLs */
 
 static unsigned int surfacelight_fshader;
 static unsigned int surfacelight_vshader;
@@ -455,6 +459,48 @@ void kl_gl3_pass_gbuffer(kl_array_t *models) {
     glFrontFace(GL_CCW);
   }
   
+  /* half-resolution lighting depth pass */
+  int w, h;
+  kl_vid_size(&w, &h);
+  glViewport(0, 0, w/2, h/2);
+  
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbo_halflighting);
+  unsigned int attachments_halfdepth[] = {GL_NONE};
+  glDrawBuffers(1, attachments_halfdepth);
+  
+  glClear(GL_DEPTH_BUFFER_BIT);
+  
+  glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+  
+  glUseProgram(gbufferback_program);
+
+  glBindBufferBase(GL_UNIFORM_BUFFER, 0, ubo_scene);
+  glUniform1i(gbufferback_uniform_tdiffuse, 0);
+  
+  kl_mat4f_t identity = KL_MAT4F_IDENTITY;
+  glUniformMatrix4fv(minimal_uniform_modelmatrix, 1, GL_FALSE, (float*)&identity);
+  
+  for (int i = 0; i < kl_array_size(models); i++) {
+    kl_model_t *model;
+    kl_array_get(models, i, &model);
+    
+    glFrontFace(convertenum(model->winding));
+    glBindVertexArray(model->attribs);
+    for (int i=0; i < model->mesh_n; i++) {
+      kl_mesh_t *mesh = model->mesh + i;
+
+      set_texture(0, mesh->material->diffuse->id, GL_TEXTURE_2D);
+      
+      glDrawElements(GL_TRIANGLES, 3*mesh->tris_n, GL_UNSIGNED_INT, (void*)(3*mesh->tris_i*sizeof(int)));
+    }
+    glFrontFace(GL_CCW);
+  }
+  
+  glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+  
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+  glViewport(0, 0, w, h);
+  
   glDisable(GL_DEPTH_TEST);
   glDisable(GL_CULL_FACE);
 
@@ -606,14 +652,16 @@ void kl_gl3_pass_pointshadow(kl_light_t *light) {
   kl_array_t surflights;
   kl_array_init(&surflights, sizeof(surfacelight_t));
   for (int i = 0; i < bouncemapsize * bouncemapsize * 6; i++) {
-    radiosity[i].x /= attenuation;
-    radiosity[i].y /= attenuation;
-    radiosity[i].z /= attenuation;
+    if (!pointbounce_mask[i % bouncemapsize * bouncemapsize]) continue;
+    const float multiplier = 16.0f; /* compensates for lack of additonal bounces */
+    radiosity[i].x *= multiplier / attenuation;
+    radiosity[i].y *= multiplier / attenuation;
+    radiosity[i].z *= multiplier / attenuation;
     
     float r = radiosity[i].x;
     float g = radiosity[i].y;
     float b = radiosity[i].z;
-    float radius = 64.0f * sqrtf(r > g ? (r > b ? r : b) : (g > b ? g : b));
+    float radius = 32.0f * sqrtf(r > g ? (r > b ? r : b) : (g > b ? g : b));
     
     surfacelight_t surflight = (surfacelight_t) {
       .position = {
@@ -653,10 +701,17 @@ void kl_gl3_pass_surfacelight(kl_array_t *lights) {
   glUseProgram(0);
   
   glEnable(GL_STENCIL_TEST);
-    
-  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbo_lighting);
+  
+  int w, h;
+  kl_vid_size(&w, &h);
+  glViewport(0, 0, w/2, h/2);
+  
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbo_halflighting);
   unsigned int attachments[] = {GL_COLOR_ATTACHMENT0};
   glDrawBuffers(1, attachments);
+  
+  glClear(GL_COLOR_BUFFER_BIT);
+  
   for (int i = 0; i < kl_array_size(lights); i++) {
     surfacelight_t light;
     kl_array_get(lights, i, &light);
@@ -731,11 +786,32 @@ void kl_gl3_pass_surfacelight(kl_array_t *lights) {
     glStencilMask(0xFF);
   }
 
-  glUseProgram(0);
-  
-  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-  
   glDisable(GL_STENCIL_TEST);
+  
+  
+  /* upsample to full-resolution */
+  glViewport(0, 0, w, h);
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbo_lighting);
+  glDrawBuffers(1, attachments);
+
+  glUseProgram(bilateral_program);
+  
+  glUniform1i(bilateral_uniform_thdepth, 0);
+  glUniform1i(bilateral_uniform_tldepth, 1);
+  glUniform1i(bilateral_uniform_timage, 2);
+  
+  set_texture(0, gbuffer_tex_depth[0], GL_TEXTURE_RECTANGLE);
+  set_texture(1, gbuffer_tex_depth[1], GL_TEXTURE_RECTANGLE);
+  set_texture(2, tex_halflighting, GL_TEXTURE_RECTANGLE);
+
+  glEnable(GL_BLEND);
+  glBlendFunc(GL_ONE, GL_ONE);
+  draw_quad();
+  glDisable(GL_BLEND);
+
+  glUseProgram(0);
+
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
 }
 
 void kl_gl3_pass_pointshadow_face(int face, kl_array_t *models) {
@@ -984,7 +1060,7 @@ void kl_gl3_pass_pointlight(kl_array_t *lights) {
     set_texture(3, gbuffer_tex_specular, GL_TEXTURE_RECTANGLE);
     set_texture(4, tex_shadow,           GL_TEXTURE_RECTANGLE);
 
-    draw_pquad();
+    //draw_pquad();
 
     glStencilMask(0xFF);
     glDisable(GL_BLEND);
@@ -1127,13 +1203,14 @@ void kl_gl3_debugtex(int mode) {
       blit_to_screen(ssao_tex_occlusion[5], 0.18, 0.18,  0.78, -0.785, -1.0, 1.0);
       break;
     case 5:
-      blit_to_screen(tex_shadow, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0);
+      //blit_to_screen(tex_shadow, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0);
+      blit_to_screen(tex_halflighting, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0);
       glEnable(GL_BLEND);
       glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
       blit_cube_to_screen(cubedepth_tex_shadow,      0.2, 0.356, 0.0, -0.6, 0.001, 0.0);
       blit_cube_to_screen(pointbounce_tex_position,  0.2, 0.356, -0.4, -0.6, 0.001, 0.0);
       blit_cube_to_screen(pointbounce_tex_normal,    0.2, 0.356, 0.4, -0.6, 0.5, 0.5);
-      blit_cube_to_screen(pointbounce_tex_radiosity, 0.2, 0.356, 0.8, -0.6, 1.0, 0.0);
+      blit_cube_to_screen(pointbounce_tex_radiosity, 0.2, 0.356, 0.8, -0.6, 0.0001, 0.0);
       glDisable(GL_BLEND);
       break;
   }
@@ -1709,6 +1786,23 @@ static int init_lighting(int width, int height) {
   }
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
   
+  /* half-resolution lighting buffer -- for VPLs, particles, etc. */
+  rbo_halfdepth = create_renderbuffer(GL_DEPTH24_STENCIL8, width/2, height/2);
+  tex_halflighting = create_rendertexture(GL_TEXTURE_RECTANGLE, true, false);
+  initialize_rendertexture(tex_halflighting, GL_TEXTURE_RECTANGLE, GL_RGBA16F, width/2, height/2);
+
+  glGenFramebuffers(1, &fbo_halflighting);
+  glBindFramebuffer(GL_FRAMEBUFFER, fbo_halflighting);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_RECTANGLE, tex_halflighting, 0);
+  glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, rbo_halfdepth);
+  status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+  if (status != GL_FRAMEBUFFER_COMPLETE) {
+    fprintf(stderr, "Render: half-resolution lighting framebuffer is incomplete.\n\tDetails: %x\n", status);
+    return -1;
+  }
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  
+  
   tex_shadow = create_rendertexture(GL_TEXTURE_RECTANGLE, true, true);
   initialize_rendertexture(tex_shadow, GL_TEXTURE_RECTANGLE, GL_R8, width, height);
 
@@ -1783,6 +1877,23 @@ static int init_lighting(int width, int height) {
     }
   }
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  
+  pointbounce_mask = malloc(bouncemapsize * bouncemapsize * sizeof(bool));
+  for (int i = 0; i < bouncemapsize; i++) {
+    float x = 2.0f * ((float)i + 0.5f) / bouncemapsize - 1.0f;
+    for (int j = 0; j < bouncemapsize; j++) {
+      float y = 2.0f * ((float)j + 0.5f) / bouncemapsize - 1.0f;
+      float r = sqrtf(x*x + y*y + 1.0f);
+      float prob = 1.0f / r;
+      
+      float val = (float)rand() / (float)RAND_MAX;
+      
+      int index = j * bouncemapsize + i;
+      pointbounce_mask[index] = val <= prob;
+      printf("%d", pointbounce_mask[index]);
+    }
+    printf("\n");
+  }
 
   /* point lighting */
   if (create_shader("point lighting vertex shader", GL_VERTEX_SHADER, vshader_pointlight_src, &pointlight_vshader) < 0) return -1;
