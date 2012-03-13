@@ -117,23 +117,29 @@ static const char *fshader_downsample_src =
 "#version 330\n"
 "uniform sampler2DRect tdepth;\n"
 "uniform sampler2DRect tback;\n"
+"uniform sampler2DRect tnormal;\n"
 "layout(location = 0) out float gdepth;\n"
 "layout(location = 1) out float gback;\n"
+"layout(location = 2) out vec2 gnormal;\n"
 "vec2 coord[] = vec2[](\n"
 "  gl_FragCoord.xy * 2.0 + vec2(-0.5, -0.5),\n"
 "  gl_FragCoord.xy * 2.0 + vec2( 0.5, -0.5),\n"
 "  gl_FragCoord.xy * 2.0 + vec2(-0.5,  0.5),\n"
 "  gl_FragCoord.xy * 2.0 + vec2( 0.5,  0.5)\n"
 ");\n"
+DEF_NORMAL_ENCODING
 "void main() {\n"
 "  float depth_front = 0.0;\n"
 "  float depth_back  = 0.0;\n"
+"  vec3  normal = vec3(0.0, 0.0, 0.0);\n"
 "  for (int i=0; i < 4; i++) {\n"
 "    depth_front += texture(tdepth, coord[i]).r;\n"
 "    depth_back  += texture(tback,  coord[i]).r;\n"
+"    normal += decode_normal(texture(tnormal, coord[i]).xy);\n"
 "  }\n"
 "  gdepth = depth_front / 4.0;\n"
 "  gback  = depth_back  / 4.0;\n"
+"  gnormal = encode_normal(normalize(normal));\n"
 "}\n";
 
 static const char *vshader_ssao_src = 
@@ -241,6 +247,7 @@ static const char *fshader_bilateral_src =
 "  4.0, 16.0, 26.0, 16.0, 4.0,\n"
 "  1.0,  4.0,  7.0,  4.0, 1.0\n"
 ");\n"
+"float div = 277.0;\n"
 "vec2 offset[] = vec2[](\n"
 "  vec2(-2, -2), vec2(-1, -2), vec2( 0, -2), vec2( 1, -2), vec2( 2, -2),\n"
 "  vec2(-2, -1), vec2(-1, -1), vec2( 0, -1), vec2( 1, -1), vec2( 2, -1),\n"
@@ -253,14 +260,18 @@ static const char *fshader_bilateral_src =
 "  float depth = texture(thdepth, gl_FragCoord.xy).r;\n"
 "  float total = 0.0;\n"
 "  vec4  value = vec4(0.0, 0.0, 0.0, 0.0);\n"
+"  vec4  fallback = vec4(0.0, 0.0, 0.0, 0.0);\n"
 "  for (int i=0; i < 25; i++) {\n"
 "      vec2 texcoord = gl_FragCoord.xy / ratio + offset[i];\n"
 "      float sample_depth = texture(tldepth, texcoord).r;\n"
-"      float scale = abs(sample_depth - depth) > 3.0 ? 0.0 : 1.0;\n"
-"      value += scale * weight[i] * texture(timage, texcoord);\n"
+"      float scale = abs(sample_depth - depth) > 0.01 * depth ? 0.0 : 1.0;\n"
+"      vec4 sample = weight[i] * texture(timage, texcoord);\n"
+"      fallback += sample;\n"
+"      value += scale * sample;\n"
 "      total += scale * weight[i];\n"
 "  }\n"
-"  color = total < 0.01 ? texture(timage, gl_FragCoord.xy / ratio) : value / total;\n"
+""
+"  color = total < 0.001 ? fallback / div : value / total;\n"
 "}\n";
 
 static const char *vshader_shadowfilter_src = 
@@ -323,6 +334,32 @@ static const char *fshader_flatcolor_src =
 "  outcolor = vec4(color, 1.0);\n"
 "}\n";
 
+static const char *vshader_lighting_src = 
+"#version 330\n"
+"layout(location = 0) in vec3 vcoord;\n"
+"void main () {\n"
+"  gl_Position = vec4(vcoord, 1.0);\n"
+"}\n";
+
+static const char *fshader_lighting_src = 
+"#version 330\n"
+"uniform sampler2DRect tdiffuse;\n"
+"uniform sampler2DRect tspecular;\n"
+"uniform sampler2DRect tambient;\n"
+"uniform sampler2DRect talbedo;\n"
+"uniform sampler2DRect tocclusion;\n"
+"uniform sampler2DRect temissive;\n"
+"layout(location = 0) out vec4 final;\n"
+"void main() {\n"
+"  final.rgb  = texture(tambient, gl_FragCoord.xy).rgb;\n"
+"  final.rgb *= 1.0 - texture(tocclusion, gl_FragCoord.xy).r;\n"
+"  final.rgb += texture(tdiffuse, gl_FragCoord.xy).rgb;\n"
+"  final.rgb *= texture(talbedo, gl_FragCoord.xy).rgb;\n"
+"  final.rgb += texture(tspecular, gl_FragCoord.xy).rgb;\n"
+"  vec4 glow  = texture(temissive, gl_FragCoord.xy);\n"
+"  final.rgb += glow.rgb * exp2(glow.a * 64.0 - 32.0);\n"
+"}\n";
+
 static const char *vshader_pointlight_src = 
 "#version 330\n"
 DEF_BLOCK_SCENE
@@ -349,19 +386,19 @@ static const char *fshader_pointlight_src =
 "} light;\n"
 "uniform sampler2DRect tdepth;\n"
 "uniform sampler2DRect tnormal;\n"
-"uniform sampler2DRect tdiffuse;\n"
 "uniform sampler2DRect tspecular;\n"
 "uniform sampler2DRect tshadow;\n"
 "smooth in vec3 fray_eye;\n"
 "smooth in vec3 fray_world;\n"
 "smooth in vec3 fcenter_eye;\n"
-"layout(location = 0) out vec4 color;\n"
+"layout(location = 0) out vec4 diffuse;\n"
+"layout(location = 1) out vec4 specular;\n"
 DEF_NORMAL_ENCODING
 "void main () {\n"
 "  float depth = texture(tdepth, gl_FragCoord.xy).r;\n"
 "  vec3  coord_eye = fray_eye * depth;\n"
 "  float dist = distance(fcenter_eye, coord_eye);\n"
-"  float irradiance = light.color.a / (dist * dist);\n"
+"  vec3  irradiance = light.color.rgb * light.color.a / (dist * dist);\n"
 ""
 "  vec3 N = decode_normal(texture(tnormal, gl_FragCoord.xy).xy);\n"
 ""
@@ -370,7 +407,6 @@ DEF_NORMAL_ENCODING
 "  vec3 H = normalize(L + V);\n"
 "  vec3 R  = 2.0 * N * dot(N, L) - L;\n"
 ""
-"  vec3 diff = texture(tdiffuse, gl_FragCoord.xy).rgb;\n"
 "  vec4 spec = texture(tspecular, gl_FragCoord.xy);\n"
 "  float fresnel_0 = spec.b;\n"
 "  float fresnel = fresnel_0 + (1.0 - fresnel_0) * pow(1.0 - dot(V, H), 5.0);\n" /* fresnel term */
@@ -378,12 +414,13 @@ DEF_NORMAL_ENCODING
 "  const float epsilon = 1.0;\n"
 "  float shadow = texture(tshadow, gl_FragCoord.xy).r;\n"
 ""
-"  color.rgb  = diff * max(0.0, dot(N, L));\n" /* diffuse */
+"  diffuse.rgb = max(0.0, dot(N, L)) * irradiance * shadow;\n"
+"  diffuse.a   = 1.0;\n"
+""
 "  vec3  spec_intensity = spec.rrr;\n"
 "  float spec_exponent  = spec.g * 255.0;\n"
-"  color.rgb += spec_intensity * fresnel * pow(max(0.0, dot(R, V)), spec_exponent);\n" /* specular */
-"  color.rgb *= light.color.rgb * irradiance * shadow;\n"
-"  color.a    = 1.0;\n"
+"  specular.rgb = spec_intensity * fresnel * pow(max(0.0, dot(R, V)), spec_exponent) * irradiance * shadow;\n"
+"  specular.a   = 1.0;\n"
 "}\n";
 
 static const char *vshader_surfacelight_src = 
@@ -412,22 +449,21 @@ static const char *fshader_surfacelight_src =
 "smooth in vec3 fray_eye;\n"
 "smooth in vec3 fcenter_eye;\n"
 "smooth in vec3 fdir_eye;\n"
-"layout(location = 0) out vec4 color;\n"
+"layout(location = 0) out vec4 ambient;\n"
 DEF_NORMAL_ENCODING
 "void main () {\n"
-"  vec2  texcoord = 2.0 * gl_FragCoord.xy;\n"
-"  float depth = texture(tdepth, texcoord).r;\n"
+"  float depth = texture(tdepth, gl_FragCoord.xy).r;\n"
 "  vec3  coord_eye = fray_eye * depth;\n"
 "  float dist = distance(fcenter_eye, coord_eye);\n"
 "  float falloff = min(1.0 / (64.0 * 64.0), 1.0f / (dist * dist));\n"
 ""
-"  vec3 N = decode_normal(texture(tnormal, texcoord).xy);\n"
+"  vec3 N = decode_normal(texture(tnormal, gl_FragCoord.xy).xy);\n"
 "  vec3 L = normalize(fcenter_eye - coord_eye);\n"
 "  vec3 irradiance = radiosity * max(0.0, dot(fdir_eye, -L)) * falloff;\n"
 ""
-"  color.rgb = max(0.0, dot(N, L)) * irradiance;\n"
-//"  color.rgb = vec3(1.0, 1.0, 1.0);\n"
-"  color.a   = falloff;\n"
+"  ambient.rgb = max(0.0, dot(N, L)) * irradiance;\n"
+//"  ambient.rgb = vec3(1.0, 1.0, 1.0);\n"
+"  ambient.a   = 1.0;\n"
 "}\n";
 
 static const char *vshader_envlight_src = 
@@ -451,13 +487,12 @@ DEF_BLOCK_SCENE
 "} light;\n"
 "uniform sampler2DRect tdepth;\n"
 "uniform sampler2DRect tnormal;\n"
-"uniform sampler2DRect tdiffuse;\n"
 "uniform sampler2DRect tspecular;\n"
-"uniform sampler2DRect temissive;\n"
-"uniform sampler2DRect tocclusion;\n"
 "smooth in vec3 fray_eye;\n"
 "smooth in vec2 ftexcoord;\n"
-"layout(location = 0) out vec4 color;\n"
+"layout(location = 0) out vec4 diffuse;\n"
+"layout(location = 1) out vec4 specular;\n"
+"layout(location = 2) out vec4 ambient;\n"
 DEF_NORMAL_ENCODING
 "void main () {\n"
 "  float depth = texture(tdepth, gl_FragCoord.xy).r;\n"
@@ -465,28 +500,26 @@ DEF_NORMAL_ENCODING
 ""
 "  vec3 N = decode_normal(texture(tnormal, gl_FragCoord.xy).xy);\n"
 ""
-"  float occlusion = pow(1.0 - max(0.0, texture(tocclusion, gl_FragCoord.xy).r), 1.5);\n"
-""
 "  vec3 L = normalize(viewrot * -light.direction.xyz);\n"
 "  vec3 V = -normalize(fray_eye);\n"
 "  vec3 H = normalize(L + V);\n"
 "  vec3 R = 2.0 * N * dot(N, L) - L;\n"
 ""
-"  vec3 diff  = texture(tdiffuse, gl_FragCoord.xy).rgb;\n"
 "  vec4 spec  = texture(tspecular, gl_FragCoord.xy);\n"
-"  vec4 glow  = texture(temissive, gl_FragCoord.xy);\n"
 ""
 "  float fresnel_0 = spec.b;\n"
 "  float fresnel = fresnel_0 + (1.0 - fresnel_0) * pow(1.0 - dot(V, H), 5.0);\n" /* fresnel term */
 ""
-"  color.rgb  = diff * max(0.0, dot(N, L));\n" /* diffuse */
+"  vec3  irradiance = light.color.rgb * light.color.a;\n"
+""
+"  diffuse.rgb = max(0.0, dot(N, L)) * irradiance;\n"
+"  diffuse.a   = 1.0;\n"
 "  vec3  spec_intensity = spec.rrr;\n"
 "  float spec_exponent  = spec.g * 255.0;\n"
-"  color.rgb += spec_intensity * fresnel * pow(max(0.0, dot(R, V)), spec_exponent);\n" /* specular */
-"  color.rgb *= light.color.rgb * light.color.a;\n" /* diffuse/specular scale */
-"  color.rgb += diff * light.ambient.rgb * light.ambient.a * occlusion;\n" /* ambient */
-"  color.rgb += glow.rgb * exp2(glow.a * 64.0 - 32.0);\n" /* emissive */
-"  color.a    = 1.0;\n"
+"  specular.rgb = spec_intensity * fresnel * pow(max(0.0, dot(R, V)), spec_exponent) * irradiance;\n"
+"  specular.a   = 1.0;\n"
+"  ambient.rgb = light.ambient.rgb * light.ambient.a;\n"
+"  ambient.a   = 1.0;\n"
 "}\n";
 
 static const char *vshader_cubedepth_src =

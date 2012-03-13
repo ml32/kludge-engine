@@ -99,6 +99,15 @@ int main(int argc, char **argv) {
             case KL_BTN_6:
               kl_render_set_debug(5);
               break;
+            case KL_BTN_7:
+              kl_render_set_debug(6);
+              break;
+            case KL_BTN_8:
+              kl_render_set_debug(7);
+              break;
+            case KL_BTN_9:
+              kl_render_set_debug(8);
+              break;
           }
           break;
         case KL_EVT_MOUSE:
