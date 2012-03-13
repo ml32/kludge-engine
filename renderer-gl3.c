@@ -906,10 +906,6 @@ void kl_gl3_pass_pointbounce_face(int face, kl_array_t *models) {
 }
 
 void kl_gl3_pass_shadowfilter() {
-  glDepthMask(GL_FALSE); /* disable depth writes */
-  
-  glBindVertexArray(vao_pquad);
-  
   glUseProgram(shadowfilter_program);
   
   glUniform1i(shadowfilter_uniform_tdepth, 0);
@@ -926,22 +922,20 @@ void kl_gl3_pass_shadowfilter() {
   
   glUniform1i(shadowfilter_uniform_pass, 0);
   
-  glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+  draw_pquad();
   
   glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbo_shadow);
   glDrawBuffers(1, attachments);
 
-  set_texture(2, tex_shadow, GL_TEXTURE_RECTANGLE);
+  set_texture(2, shadowfilter_tex_shadow, GL_TEXTURE_RECTANGLE);
   
   glUniform1i(shadowfilter_uniform_pass, 1);
   
-  glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+  draw_pquad();
   
   glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
   
   glUseProgram(0);
-  
-  glDepthMask(GL_TRUE);
 }
 
 void kl_gl3_pass_envlight() {
