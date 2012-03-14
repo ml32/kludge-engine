@@ -29,6 +29,8 @@ void kl_render_draw(kl_camera_t *cam) {
   kl_camera_update_frustum(cam, &frustum);
 
   kl_gl3_update_scene(&scene);
+  
+  kl_gl3_clear();
 
   kl_array_t models;
   kl_array_init(&models, sizeof(kl_model_t*));

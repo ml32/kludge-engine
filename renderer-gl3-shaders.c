@@ -76,7 +76,8 @@ DEF_NORMAL_ENCODING
 "  gdiffuse  = diffuse;\n"
 "  gnormal   = encode_normal(n_eye);\n"
 "  vec4 spec = texture(tspecular, ftexcoord);\n"
-"  gspecular = vec4(spec.r, spec.a, 0.25, 0.0);\n"
+"  float fresnel = 0.8;\n"
+"  gspecular = vec4(spec.r, spec.a, fresnel, 0.0);\n"
 "  gemissive = texture(temissive, ftexcoord);\n"
 "}\n";
 
@@ -142,6 +143,28 @@ DEF_NORMAL_ENCODING
 "  gnormal = encode_normal(normalize(normal));\n"
 "}\n";
 
+static const char *vshader_edgestencil_src = 
+"#version 330\n"
+"layout(location = 0) in vec2 vcoord;\n"
+"void main () {\n"
+"  gl_Position = vec4(vcoord, 0.0, 1.0);\n"
+"}\n";
+
+static const char *fshader_edgestencil_src = 
+"#version 330\n"
+"uniform sampler2DRect tldepth;\n"
+"uniform sampler2DRect tlnormal;\n"
+"uniform sampler2DRect thdepth;\n"
+"uniform sampler2DRect thnormal;\n"
+DEF_NORMAL_ENCODING
+"void main() {\n"
+"  float ldepth  = texture(tldepth, gl_FragCoord.xy / 2.0).r;\n"
+"  vec3  lnormal = decode_normal(texture(tlnormal, gl_FragCoord.xy / 2.0).rg);\n"
+"  float hdepth  = texture(thdepth, gl_FragCoord.xy).r;\n"
+"  vec3  hnormal = decode_normal(texture(thnormal, gl_FragCoord.xy).rg);\n"
+"  if (abs(ldepth - hdepth) < 0.5 && dot(lnormal, hnormal) > 0.98) discard;\n"
+"}\n";
+
 static const char *vshader_ssao_src = 
 "#version 330\n"
 "layout(location = 0) in vec2 vcoord;\n"
@@ -194,23 +217,24 @@ DEF_NORMAL_ENCODING
 "  vec3 tangent = dFdx(coord);\n"
 "  vec3 bitangent = dFdy(coord);\n"
 "  vec3 normal = normalize(cross(tangent, bitangent));\n"
+"  vec2 size   = textureSize(tdepth);\n"
 ""
 "  float occlusion = 0.0;\n"
 "  for (int i=0; i < 16; i++) {\n"
-"    vec2  offset = 8.0 * poisson[i];\n"
+"    vec2  offset = 6.0 * poisson[i];\n"
 "    vec2  occluder_texcoord = gl_FragCoord.xy + offset;\n"
 "    float occluder_fdepth = texture(tdepth, occluder_texcoord).r;\n"
 "    float occluder_bdepth = texture(tback, occluder_texcoord).r;\n"
 "    vec3  occluder_ray    = mix(\n"
-"      mix(ray_eye[0].xyz, ray_eye[1].xyz, occluder_texcoord.x / viewport.z),\n"
-"      mix(ray_eye[3].xyz, ray_eye[2].xyz, occluder_texcoord.x / viewport.z),\n"
-"      occluder_texcoord.y / viewport.w);\n"
+"      mix(ray_eye[0].xyz, ray_eye[1].xyz, occluder_texcoord.x / size.x),\n"
+"      mix(ray_eye[3].xyz, ray_eye[2].xyz, occluder_texcoord.x / size.x),\n"
+"      occluder_texcoord.y / size.y);\n"
 "    vec3 occluder_fcoord = occluder_fdepth * occluder_ray;\n"
 "    vec3 occluder_bcoord = occluder_bdepth * occluder_ray;\n"
 "    vec3 occluder_foffset = occluder_fcoord - coord;\n"
 "    vec3 occluder_boffset = occluder_bcoord - coord;\n"
-"    occlusion += calc_ao(occluder_foffset, normal, 64.0);\n"
-"    occlusion += calc_ao(occluder_boffset, normal, 64.0);\n"
+"    occlusion += calc_ao(occluder_foffset, normal, 32.0);\n"
+"    occlusion += calc_ao(occluder_boffset, normal, 32.0);\n"
 "  };\n"
 "  ssao = occlusion / 48.0;\n"
 "}\n";

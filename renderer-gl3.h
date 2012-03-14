@@ -11,6 +11,8 @@
 
 int kl_gl3_init();
 
+void kl_gl3_clear();
+
 void kl_gl3_pass_gbuffer(kl_array_t *models);
 
 void kl_gl3_pass_envlight();
