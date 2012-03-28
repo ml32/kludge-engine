@@ -29,6 +29,57 @@
 "  return normalize(vec3(xy * xyscale, -zscale));\n"\
 "}\n"
 
+/* Lambert diffuse */
+#define DEF_LIGHTING_DIFFUSE \
+"vec3 diffuse(vec3 L, vec3 N, vec3 H, vec3 V, vec3 C) {\n"\
+"  return C / 3.14159;\n"\
+"}\n"
+
+/* Schlick's approximation */
+#define DEF_LIGHTING_SPECULAR_FRESNEL \
+"vec3 fresnel(vec3 L, vec3 N, vec3 H, vec3 V, vec3 C) {\n"\
+"  return C + (1.0 - C) * pow(1.0 - dot(V, H), 5.0);\n"\
+"}\n"
+
+/* Beckmann distribution */
+#define DEF_LIGHTING_SPECULAR_DIST \
+"float distribution(vec3 L, vec3 N, vec3 H, vec3 V, float alpha) {\n"\
+"  float NdotH = max(0.0, dot(N, H));\n"\
+"  float NdotH2 = NdotH * NdotH;\n"\
+"  float NdotH4 = NdotH2 * NdotH2;\n"\
+"  float m = sqrt(2.0 / (alpha + 2));\n"\
+"  float m2 = m*m;\n"\
+"  return exp((NdotH2 - 1.0)/(m2 * NdotH2)) / (3.14159 * m2 * NdotH4);\n"\
+"}\n"
+
+/* Cook-Torrance shadowing term */
+#define DEF_LIGHTING_SPECULAR_GEOM \
+"float geometry(vec3 L, vec3 N, vec3 H, vec3 V) {\n"\
+"  float NdotH = max(0.0, dot(N, H));\n"\
+"  float NdotV = max(0.0, dot(N, V));\n"\
+"  float NdotL = max(0.0, dot(N, L));\n"\
+"  float VdotH = max(0.0, dot(V, H));\n"\
+"  return min(1.0, 2.0 * NdotH * min(NdotV, NdotL) / VdotH);\n"\
+"}\n"
+
+/* Cook-Torrance specular lighting */
+#define DEF_LIGHTING_SPECULAR \
+DEF_LIGHTING_SPECULAR_FRESNEL \
+DEF_LIGHTING_SPECULAR_DIST \
+DEF_LIGHTING_SPECULAR_GEOM \
+"vec3 specular(vec3 L, vec3 N, vec3 H, vec3 V, vec3 C, float alpha) {\n"\
+"  vec3  F = fresnel(L, N, H, V, C);\n"\
+"  float D = distribution(L, N, H, V, alpha);\n"\
+"  float G = geometry(L, N, H, V);\n"\
+"  float NdotV = max(0.0, dot(N, V));\n"\
+"  float NdotL = max(0.0, dot(N, L));\n"\
+"  return F * max(0.0, G * D / (4.0 * NdotL * NdotV));\n"\
+"}\n"
+
+#define DEF_LIGHTING \
+DEF_LIGHTING_DIFFUSE \
+DEF_LIGHTING_SPECULAR
+
 static const char *vshader_gbuffer_src =
 "#version 330\n"
 DEF_BLOCK_SCENE
@@ -69,15 +120,15 @@ DEF_NORMAL_ENCODING
 "  vec4 diffuse = texture(tdiffuse, ftexcoord);\n"
 "  if (diffuse.a < 0.5) discard;\n"
 "\n"
-"  vec3 n_tangent = texture(tnormal, ftexcoord).xyz * 2.0 - 1.0;\n"
+"  vec3 n_tangent = texture(tnormal, ftexcoord).xyz * 255.0 / 128.0 - 1.0;\n"
 "  vec3 n_eye = normalize(tbnmatrix * n_tangent);\n"
+//"  vec3 n_eye = normalize(tbnmatrix * vec3(0.0, 0.0, 1.0));\n"
 "\n"
 "  gdepth    = fdepth;\n"
 "  gdiffuse  = diffuse;\n"
 "  gnormal   = encode_normal(n_eye);\n"
-"  vec4 spec = texture(tspecular, ftexcoord);\n"
 "  float fresnel = 0.8;\n"
-"  gspecular = vec4(spec.r, spec.a, fresnel, 0.0);\n"
+"  gspecular = texture(tspecular, ftexcoord);\n"
 "  gemissive = texture(temissive, ftexcoord);\n"
 "}\n";
 
@@ -252,18 +303,18 @@ static const char *fshader_bilateral_src =
 "uniform sampler2DRect tldepth;\n" /* low-rez depth */
 "uniform sampler2DRect timage;\n"
 "layout(location = 0) out vec4 color;\n"
-/*
 "float weight[] = float[](\n"
 "  1.0, 2.0, 1.0,\n"
 "  2.0, 4.0, 2.0,\n"
 "  1.0, 2.0, 1.0\n"
 ");\n"
+"float div = 16.0;\n"
 "vec2 offset[] = vec2[](\n"
 "  vec2(-1, -1), vec2( 0, -1), vec2( 1, -1),\n"
 "  vec2(-1,  0), vec2( 0,  0), vec2( 1,  0),\n"
 "  vec2(-1,  1), vec2( 0,  1), vec2( 1,  1)\n"
 ");\n"
-*/
+/*
 "float weight[] = float[](\n"
 "  1.0,  4.0,  7.0,  4.0, 1.0,\n"
 "  4.0, 16.0, 26.0, 16.0, 4.0,\n"
@@ -279,13 +330,14 @@ static const char *fshader_bilateral_src =
 "  vec2(-2,  1), vec2(-1,  1), vec2( 0,  1), vec2( 1,  1), vec2( 2,  1),\n"
 "  vec2(-2,  2), vec2(-1,  2), vec2( 0,  2), vec2( 1,  2), vec2( 2,  2)\n"
 ");\n"
+*/
 "void main() {\n"
 "  vec2  ratio = textureSize(thdepth) / textureSize(tldepth);\n"
 "  float depth = texture(thdepth, gl_FragCoord.xy).r;\n"
 "  float total = 0.0;\n"
 "  vec4  value = vec4(0.0, 0.0, 0.0, 0.0);\n"
 "  vec4  fallback = vec4(0.0, 0.0, 0.0, 0.0);\n"
-"  for (int i=0; i < 25; i++) {\n"
+"  for (int i=0; i < 9; i++) {\n"
 "      vec2 texcoord = gl_FragCoord.xy / ratio + offset[i];\n"
 "      float sample_depth = texture(tldepth, texcoord).r;\n"
 "      float scale = abs(sample_depth - depth) > 0.01 * depth ? 0.0 : 1.0;\n"
@@ -365,6 +417,65 @@ static const char *vshader_lighting_src =
 "  gl_Position = vec4(vcoord, 1.0);\n"
 "}\n";
 
+static const char *vshader_tangentdebug_src = 
+"#version 400\n"
+"layout(location = 0) in vec3 vposition;\n"
+"layout(location = 1) in vec2 vtexcoord;\n"
+"layout(location = 2) in vec3 vnormal;\n"
+"layout(location = 3) in vec4 vtangent;\n"
+"out vec3 gposition;\n"
+"out mat3 gtbnmatrix;\n"
+"void main() {\n"
+"  gposition = vposition;\n"
+"  vec3 vbitangent = cross(vnormal, vtangent.xyz) * vtangent.w;\n"
+"  gtbnmatrix = mat3(vtangent.xyz, vbitangent, vnormal);\n"
+"  gl_Position = vec4(vposition, 1.0);\n"
+"}\n";
+
+static const char *gshader_tangentdebug_src = 
+"#version 400\n"
+DEF_BLOCK_SCENE
+"layout(points) in;\n"
+"layout(line_strip, max_vertices = 6) out;\n"
+"in vec3 gposition[1];\n"
+"in mat3 gtbnmatrix[1];\n"
+"smooth out vec3 fcolor;\n"
+"void main() {\n"
+"  vec3 origin = gposition[0];\n"
+"  vec3 x = gtbnmatrix[0] * vec3(1.0, 0.0, 0.0);\n"
+"  vec3 y = gtbnmatrix[0] * vec3(0.0, 1.0, 0.0);\n"
+"  vec3 z = gtbnmatrix[0] * vec3(0.0, 0.0, 1.0);\n"
+""
+"  fcolor = vec3(1.0, 0.0, 0.0);\n"
+"  gl_Position = vpmatrix * vec4(origin, 1.0);\n"
+"  EmitVertex();\n"
+"  gl_Position = vpmatrix * vec4(origin + x, 1.0);\n"
+"  EmitVertex();\n"
+"  EndPrimitive();\n"
+""
+"  fcolor = vec3(0.0, 1.0, 0.0);\n"
+"  gl_Position = vpmatrix * vec4(origin, 1.0);\n"
+"  EmitVertex();\n"
+"  gl_Position = vpmatrix * vec4(origin + y, 1.0);\n"
+"  EmitVertex();\n"
+"  EndPrimitive();\n"
+""
+"  fcolor = vec3(0.0, 0.0, 1.0);\n"
+"  gl_Position = vpmatrix * vec4(origin, 1.0);\n"
+"  EmitVertex();\n"
+"  gl_Position = vpmatrix * vec4(origin + z, 1.0);\n"
+"  EmitVertex();\n"
+"  EndPrimitive();\n"
+"}\n";
+
+static const char *fshader_tangentdebug_src =
+"#version 400\n"
+"smooth in vec3 fcolor;\n"
+"layout(location = 0) out vec4 outcolor;\n"
+"void main() {\n"
+"  outcolor = vec4(fcolor, 1.0);\n"
+"}\n";
+
 static const char *fshader_lighting_src = 
 "#version 330\n"
 "uniform sampler2DRect tdiffuse;\n"
@@ -415,36 +526,33 @@ static const char *fshader_pointlight_src =
 "smooth in vec3 fray_eye;\n"
 "smooth in vec3 fray_world;\n"
 "smooth in vec3 fcenter_eye;\n"
-"layout(location = 0) out vec4 diffuse;\n"
-"layout(location = 1) out vec4 specular;\n"
+"layout(location = 0) out vec4 out_diffuse;\n"
+"layout(location = 1) out vec4 out_specular;\n"
 DEF_NORMAL_ENCODING
+DEF_LIGHTING
 "void main () {\n"
 "  float depth = texture(tdepth, gl_FragCoord.xy).r;\n"
 "  vec3  coord_eye = fray_eye * depth;\n"
 "  float dist = distance(fcenter_eye, coord_eye);\n"
-"  vec3  irradiance = light.color.rgb * light.color.a / (dist * dist);\n"
+"  float shadow = texture(tshadow, gl_FragCoord.xy).r;\n"
 ""
 "  vec3 N = decode_normal(texture(tnormal, gl_FragCoord.xy).xy);\n"
-""
 "  vec3 L = normalize(fcenter_eye - coord_eye);\n"
 "  vec3 V = -normalize(fray_eye);\n"
 "  vec3 H = normalize(L + V);\n"
-"  vec3 R  = 2.0 * N * dot(N, L) - L;\n"
+"  vec3 E = max(0.0, dot(N, L)) * light.color.rgb * light.color.a * shadow / (dist * dist);\n" /* irradiance */
 ""
 "  vec4 spec = texture(tspecular, gl_FragCoord.xy);\n"
-"  float fresnel_0 = spec.b;\n"
-"  float fresnel = fresnel_0 + (1.0 - fresnel_0) * pow(1.0 - dot(V, H), 5.0);\n" /* fresnel term */
 ""
 "  const float epsilon = 1.0;\n"
-"  float shadow = texture(tshadow, gl_FragCoord.xy).r;\n"
 ""
-"  diffuse.rgb = max(0.0, dot(N, L)) * irradiance * shadow;\n"
-"  diffuse.a   = 1.0;\n"
+"  out_diffuse.rgb = E * diffuse(L, N, H, V, vec3(1.0, 1.0, 1.0));\n"
+"  out_diffuse.a   = 1.0;\n"
 ""
-"  vec3  spec_intensity = spec.rrr;\n"
-"  float spec_exponent  = spec.g * 255.0;\n"
-"  specular.rgb = spec_intensity * fresnel * pow(max(0.0, dot(R, V)), spec_exponent) * irradiance * shadow;\n"
-"  specular.a   = 1.0;\n"
+"  vec3  spec_intensity = spec.rgb;\n"
+"  float spec_exponent  = spec.a * 63.0 + 1.0;\n"
+"  out_specular.rgb = E * specular(L, N, H, V, spec_intensity, spec_exponent);\n"
+"  out_specular.a   = 1.0;\n"
 "}\n";
 
 static const char *vshader_surfacelight_src = 
@@ -479,7 +587,8 @@ DEF_NORMAL_ENCODING
 "  float depth = texture(tdepth, gl_FragCoord.xy).r;\n"
 "  vec3  coord_eye = fray_eye * depth;\n"
 "  float dist = distance(fcenter_eye, coord_eye);\n"
-"  float falloff = min(1.0 / (64.0 * 64.0), 1.0f / (dist * dist));\n"
+"  const float bias = 64.0;\n"
+"  float falloff = 1.0f / (dist * dist + bias * bias);\n"
 ""
 "  vec3 N = decode_normal(texture(tnormal, gl_FragCoord.xy).xy);\n"
 "  vec3 L = normalize(fcenter_eye - coord_eye);\n"
@@ -514,36 +623,32 @@ DEF_BLOCK_SCENE
 "uniform sampler2DRect tspecular;\n"
 "smooth in vec3 fray_eye;\n"
 "smooth in vec2 ftexcoord;\n"
-"layout(location = 0) out vec4 diffuse;\n"
-"layout(location = 1) out vec4 specular;\n"
-"layout(location = 2) out vec4 ambient;\n"
+"layout(location = 0) out vec4 out_diffuse;\n"
+"layout(location = 1) out vec4 out_specular;\n"
+"layout(location = 2) out vec4 out_ambient;\n"
 DEF_NORMAL_ENCODING
+DEF_LIGHTING
 "void main () {\n"
 "  float depth = texture(tdepth, gl_FragCoord.xy).r;\n"
 "  vec3  coord_eye = fray_eye * depth;\n"
 ""
 "  vec3 N = decode_normal(texture(tnormal, gl_FragCoord.xy).xy);\n"
-""
 "  vec3 L = normalize(viewrot * -light.direction.xyz);\n"
 "  vec3 V = -normalize(fray_eye);\n"
 "  vec3 H = normalize(L + V);\n"
-"  vec3 R = 2.0 * N * dot(N, L) - L;\n"
+"  vec3 E = max(0.0, dot(N, L)) * light.color.rgb * light.color.a;\n"
 ""
 "  vec4 spec  = texture(tspecular, gl_FragCoord.xy);\n"
 ""
-"  float fresnel_0 = spec.b;\n"
-"  float fresnel = fresnel_0 + (1.0 - fresnel_0) * pow(1.0 - dot(V, H), 5.0);\n" /* fresnel term */
+"  out_diffuse.rgb = E * diffuse(L, N, H, V, vec3(1.0, 1.0, 1.0));\n"
+"  out_diffuse.a   = 1.0;\n"
 ""
-"  vec3  irradiance = light.color.rgb * light.color.a;\n"
-""
-"  diffuse.rgb = max(0.0, dot(N, L)) * irradiance;\n"
-"  diffuse.a   = 1.0;\n"
-"  vec3  spec_intensity = spec.rrr;\n"
-"  float spec_exponent  = spec.g * 255.0;\n"
-"  specular.rgb = spec_intensity * fresnel * pow(max(0.0, dot(R, V)), spec_exponent) * irradiance;\n"
-"  specular.a   = 1.0;\n"
-"  ambient.rgb = light.ambient.rgb * light.ambient.a;\n"
-"  ambient.a   = 1.0;\n"
+"  vec3  spec_intensity = spec.rgb;\n"
+"  float spec_exponent  = spec.a * 63.0 + 1.0;\n"
+"  out_specular.rgb = E * specular(L, N, H, V, spec_intensity, spec_exponent);\n"
+"  out_specular.a   = 1.0;\n"
+"  out_ambient.rgb = light.ambient.rgb * light.ambient.a;\n"
+"  out_ambient.a   = 1.0;\n"
 "}\n";
 
 static const char *vshader_cubedepth_src =

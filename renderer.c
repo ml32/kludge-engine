@@ -36,7 +36,6 @@ void kl_render_draw(kl_camera_t *cam) {
   kl_array_init(&models, sizeof(kl_model_t*));
   kl_bvh_search(bvh_models, (kl_bvh_filter_cb)&checkfrustum, &frustum, &models);
   kl_gl3_pass_gbuffer(&models);
-  kl_array_free(&models);
 
   kl_gl3_pass_envlight();
   
@@ -56,6 +55,9 @@ void kl_render_draw(kl_camera_t *cam) {
   static kl_timer_t timer = KL_TIMER_INIT;
   float dt = kl_timer_tick(&timer);
   kl_gl3_composite(dt);
+
+  //kl_gl3_pass_tangents(&models);
+  kl_array_free(&models);
 
   kl_gl3_debugtex(debugmode);
 }

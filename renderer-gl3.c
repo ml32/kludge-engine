@@ -25,7 +25,10 @@ static const float anisotropy = 4.0f;
 static const int   mipbias = 0;
 static const int   shadowsize = 512;
 static const int   bouncemapsize = 8;
-#define MULTIRESLEVELS 6
+static const int   indirectscale = 0;
+/* Do not set MULTIRESLEVELS higher than 4 -- indirect illumination does not take into account */
+/* the distance/angle from the source during refinement.  Large granularity causes artifacts. */
+#define MULTIRESLEVELS 4
 
 static int convertenum(int value);
 static int create_shader(char *name, int type, const char *src, unsigned int *shader);
@@ -227,6 +230,11 @@ static int blit_cube_uniform_size;
 static int blit_cube_uniform_offset;
 static int blit_cube_uniform_colorscale;
 static int blit_cube_uniform_coloroffset;
+
+static unsigned int tangentdebug_vshader;
+static unsigned int tangentdebug_gshader;
+static unsigned int tangentdebug_fshader;
+static unsigned int tangentdebug_program;
 
 /* full-screen quad (NDC coordinates) */
 static int vbo_quad_coords;
@@ -697,7 +705,7 @@ void kl_gl3_pass_pointshadow(kl_light_t *light) {
   for (int i = 0; i < bouncemapsize * bouncemapsize * 6; i++) {
     if (!pointbounce_mask[i % bouncemapsize * bouncemapsize]) continue;
     
-    const float multiplier = 32.0f; /* compensates for lack of additonal bounces */
+    const float multiplier = 4.0f; /* compensates for lack of additonal bounces */
     radiosity[i].x *= multiplier / attenuation;
     radiosity[i].y *= multiplier / attenuation;
     radiosity[i].z *= multiplier / attenuation;
@@ -744,7 +752,7 @@ void kl_gl3_pass_surfacelight(kl_array_t *lights) {
   glEnable(GL_BLEND);
   glBlendFunc(GL_ONE, GL_ONE); /* additive blending */
   
-  for (int level = MULTIRESLEVELS-1; level >= 0; level--) {
+  for (int level = MULTIRESLEVELS-1; level >= indirectscale; level--) {
     glViewport(0, 0, width >> level, height >> level);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, lighting_fbo_multires[level]);
     unsigned int attachments[] = {GL_COLOR_ATTACHMENT0};
@@ -1044,6 +1052,27 @@ void kl_gl3_draw_pass_debug(kl_mat4f_t *modelmatrix, float r, float g, float b) 
   glDrawElements(GL_TRIANGLES, SPHERE_NUMTRIS * 3, GL_UNSIGNED_INT, 0);
 }
 
+void kl_gl3_pass_tangents(kl_array_t *models) {
+  glUseProgram(tangentdebug_program);
+
+  glBindBufferBase(GL_UNIFORM_BUFFER, 0, ubo_scene);
+  
+  for (int i = 0; i < kl_array_size(models); i++) {
+    kl_model_t *model;
+    kl_array_get(models, i, &model);
+    
+    glFrontFace(convertenum(model->winding));
+    glBindVertexArray(model->attribs);
+    for (int i=0; i < model->mesh_n; i++) {
+      kl_mesh_t *mesh = model->mesh + i;
+      glDrawElements(GL_POINTS, 3*mesh->tris_n, GL_UNSIGNED_INT, (void*)(3*mesh->tris_i*sizeof(int)));
+    }
+    glFrontFace(GL_CCW);
+  }
+  
+  glUseProgram(0);
+}
+
 void kl_gl3_composite(float dt) {
   int width, height;
   kl_vid_size(&width, &height);
@@ -1054,7 +1083,7 @@ void kl_gl3_composite(float dt) {
   //glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
   glEnable(GL_STENCIL_TEST);
   glStencilFunc(GL_EQUAL, 0, 0xFF);
-  for (int i = MULTIRESLEVELS - 2; i >= 0; i--) {
+  for (int i = MULTIRESLEVELS - 2; i >= indirectscale; i--) {
     glViewport(0, 0, width >> i, height >> i);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, lighting_fbo_multires[i]);
     unsigned int attachments[] = {GL_COLOR_ATTACHMENT0};
@@ -1070,9 +1099,21 @@ void kl_gl3_composite(float dt) {
   unsigned int attachments_ambient[] = {GL_COLOR_ATTACHMENT2}; /* write to ambient buffer only */
   glDrawBuffers(1, attachments_ambient);
 
+  glUseProgram(bilateral_program);
+  
+  glUniform1i(bilateral_uniform_thdepth, 0);
+  glUniform1i(bilateral_uniform_tldepth, 1);
+  glUniform1i(bilateral_uniform_timage, 2);
+  
+  set_texture(0, gbuffer_tex_depth[0], GL_TEXTURE_RECTANGLE);
+  set_texture(1, gbuffer_tex_depth[indirectscale], GL_TEXTURE_RECTANGLE);
+  set_texture(2, lighting_tex_multires[indirectscale], GL_TEXTURE_RECTANGLE);
+
   glEnable(GL_BLEND);
   glBlendFunc(GL_ONE, GL_ONE);
-  blit(lighting_tex_multires[0], 1.0f, 1.0f, 0.0f, 0.0f, 1.0f, 0.0f);
+
+  draw_quad();
+
   glDisable(GL_BLEND);
   
   /* finalize lighting */
@@ -1131,14 +1172,16 @@ void kl_gl3_composite(float dt) {
     float d2 = x*x + y*y;
     float weight = expf(-d2 / (w*w / 8.0f));
     
-    num += weight * logf(0.0001f + Y);
+    //num += weight * logf(0.0001f + Y);
+    num += weight * Y;
     div += weight;
   }
-  float mean = expf(num / div);
+  //float mean = expf(num / div);
+  float mean = num / div;
   free(samples);
   
   /* determine half-brightness level */
-  const float lambda   = 0.5f; /* rate of decay */
+  const float lambda   = 2.0f; /* rate of decay */
   const float exposure = 1.0f / 8.0f;
   const float minsigma = 0.05f; /* the minimum light level that the viewer can adapt to */
   float decay = exp(-lambda * dt);
@@ -1572,9 +1615,9 @@ static int init_gbuffer(int width, int height) {
   /* depth: 32f */
   /* depth (back): 32f */
   /* normal: 16f X, 16f Y (Lambert azimuthal equal-area projection) */
-  /* diffuse: 8 red, 8 blue, 8 green, 8 unused */
-  /* specular: 8 intensity, 8 exponent, 8 fresnel coeff (perpendicular reflectance), 8 unused */
-  /* emissive: 8 red, 8 blue, 8 green, 8 intensity exponent */
+  /* diffuse: 8 red, 8 green, 8 blue, 8 unused */
+  /* specular: 8 red, 8 green, 8 blue, 8 shinyness */
+  /* emissive: 8 red, 8 green, 8 blue, 8 intensity exponent */
 
   int w = width;
   int h = height;
@@ -1589,7 +1632,7 @@ static int init_gbuffer(int width, int height) {
     initialize_rendertexture(texture, GL_TEXTURE_RECTANGLE, GL_R32F, w, h);
     gbuffer_tex_back[i] = texture;
     
-    texture = create_rendertexture(GL_TEXTURE_RECTANGLE, false, false);
+    texture = create_rendertexture(GL_TEXTURE_RECTANGLE, true, false);
     initialize_rendertexture(texture, GL_TEXTURE_RECTANGLE, GL_RG16, w, h);
     gbuffer_tex_normal[i] = texture;
 
@@ -1786,12 +1829,19 @@ static int init_minimal() {
   flatcolor_uniform_modelmatrix = glGetUniformLocation(flatcolor_program, "modelmatrix");
   flatcolor_uniform_color     = glGetUniformLocation(flatcolor_program, "color");
 
+  if (create_shader("tangent-space debug vertex shader", GL_VERTEX_SHADER, vshader_tangentdebug_src, &tangentdebug_vshader) < 0) return -1;
+  if (create_shader("tangent-space debug geometry shader", GL_GEOMETRY_SHADER, gshader_tangentdebug_src, &tangentdebug_gshader) < 0) return -1;
+  if (create_shader("tangent-space debug fragment shader", GL_FRAGMENT_SHADER, fshader_tangentdebug_src, &tangentdebug_fshader) < 0) return -1;
+  if (create_program("tangent-space debug shader program", tangentdebug_vshader, tangentdebug_gshader, tangentdebug_fshader, &tangentdebug_program) < 0) return -1;
+
+  bind_ubo(tangentdebug_program, "scene", 0);
+
   return 0;
 }
 
 static int init_lighting(int width, int height) {
   lighting_tex_final = create_rendertexture(GL_TEXTURE_2D, true, false);
-  initialize_rendertexture(lighting_tex_final, GL_TEXTURE_2D, GL_RGBA16F, width, height);
+  initialize_rendertexture(lighting_tex_final, GL_TEXTURE_2D, GL_RGB16F, width, height);
 
   glGenFramebuffers(1, &lighting_fbo_final);
   glBindFramebuffer(GL_FRAMEBUFFER, lighting_fbo_final);
@@ -1805,11 +1855,11 @@ static int init_lighting(int width, int height) {
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
   
   lighting_tex_diffuse = create_rendertexture(GL_TEXTURE_RECTANGLE, true, false);
-  initialize_rendertexture(lighting_tex_diffuse, GL_TEXTURE_RECTANGLE, GL_RGBA16F, width, height);
+  initialize_rendertexture(lighting_tex_diffuse, GL_TEXTURE_RECTANGLE, GL_RGB16F, width, height);
   lighting_tex_specular = create_rendertexture(GL_TEXTURE_RECTANGLE, true, false);
-  initialize_rendertexture(lighting_tex_specular, GL_TEXTURE_RECTANGLE, GL_RGBA16F, width, height);
+  initialize_rendertexture(lighting_tex_specular, GL_TEXTURE_RECTANGLE, GL_RGB16F, width, height);
   lighting_tex_ambient = create_rendertexture(GL_TEXTURE_RECTANGLE, true, false);
-  initialize_rendertexture(lighting_tex_ambient, GL_TEXTURE_RECTANGLE, GL_RGBA16F, width, height);
+  initialize_rendertexture(lighting_tex_ambient, GL_TEXTURE_RECTANGLE, GL_RGB16F, width, height);
 
   glGenFramebuffers(1, &lighting_fbo_intermediate);
   glBindFramebuffer(GL_FRAMEBUFFER, lighting_fbo_intermediate);
@@ -1824,12 +1874,12 @@ static int init_lighting(int width, int height) {
   }
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
   
-  /* multiresolution lighting buffer -- for gathering indirect light */
+  /* multiresolution lighting buffer -- for indirect light */
   glGenFramebuffers(MULTIRESLEVELS, lighting_fbo_multires);
   for (int i = 0; i < MULTIRESLEVELS; i++) {
     lighting_rbo_multires[i] = create_renderbuffer(GL_DEPTH24_STENCIL8, width >> i, height >> i);
     lighting_tex_multires[i] = create_rendertexture(GL_TEXTURE_RECTANGLE, true, false);
-    initialize_rendertexture(lighting_tex_multires[i], GL_TEXTURE_RECTANGLE, GL_RGBA16F, width >> i, height >> i);
+    initialize_rendertexture(lighting_tex_multires[i], GL_TEXTURE_RECTANGLE, GL_RGB16F, width >> i, height >> i);
 
     glBindFramebuffer(GL_FRAMEBUFFER, lighting_fbo_multires[i]);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_RECTANGLE, lighting_tex_multires[i], 0);

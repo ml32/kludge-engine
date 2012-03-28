@@ -455,30 +455,31 @@ static void updatetangent(obj_data_t *objdata, unsigned int idx1, unsigned int i
   float dv1 = t1.y - t0.y;
   float dv2 = t2.y - t0.y;
 
-  float scale = 1.0f / (du1 * dv2 - du2 * dv1);
-
   kl_vec3f_t dv2dp1, dv1dp2, du1dp2, du2dp1;
   kl_vec3f_scale(&dv2dp1, &dp1, dv2);
   kl_vec3f_scale(&dv1dp2, &dp2, dv1);
   kl_vec3f_scale(&du1dp2, &dp2, du1);
   kl_vec3f_scale(&du2dp1, &dp1, du2);
 
-  kl_vec3f_t tangent, bitangent;
-  kl_vec3f_sub(&tangent, &du1dp2, &du2dp1);
-  kl_vec3f_scale(&tangent, &tangent, scale);
-  kl_vec3f_sub(&bitangent, &dv2dp1, &dv1dp2);
-  kl_vec3f_scale(&bitangent, &bitangent, scale);
+  kl_vec3f_t T, B;
+  kl_vec3f_sub(&T, &dv2dp1, &dv1dp2);
+  kl_vec3f_sub(&B, &du1dp2, &du2dp1);
+  
+  if (du1 * dv2 - du2 * dv1 < 0.0f) {
+    kl_vec3f_negate(&T, &T);
+    kl_vec3f_negate(&B, &B);
+  }
 
   kl_vec4f_t avgtan;
   kl_vec3f_t avgbitan;
   kl_array_get(&objdata->buftangent, idx1, &avgtan);
   kl_array_get(&objdata->bufbitangent, idx1, &avgbitan);
-  avgtan.x += tangent.x;
-  avgtan.y += tangent.y;
-  avgtan.z += tangent.z;
-  avgbitan.x += bitangent.x;
-  avgbitan.y += bitangent.y;
-  avgbitan.z += bitangent.z;
+  avgtan.x += T.x;
+  avgtan.y += T.y;
+  avgtan.z += T.z;
+  avgbitan.x += B.x;
+  avgbitan.y += B.y;
+  avgbitan.z += B.z;
   kl_array_set(&objdata->buftangent, idx1, &avgtan);
   kl_array_set(&objdata->bufbitangent, idx1, &avgbitan);
 }

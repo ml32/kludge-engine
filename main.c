@@ -28,7 +28,7 @@ int main(int argc, char **argv) {
     .position    = { .x = 0.0f, .y = 0.0f, .z = 0.0f },
     .orientation = { .r = 1.0f, .i = 0.0f, .j = 0.0f, .k = 0.0f },
     .aspect = (float)w/(float)h,
-    .fov = 1.5708f, /* pi/2 rad or 90 deg */
+    .fov = 1.047f, /* ~60deg */
 	.viewport = { .x = 0, .y = 0, .z = w, .w = h },
     .near = 1.0f,
     .far  = 10000.0f
@@ -40,6 +40,8 @@ int main(int argc, char **argv) {
   kl_render_add_model(model1);
   kl_model_t *model2 = kl_model_load("test_assets/sponza.obj");
   kl_render_add_model(model2);
+  kl_model_t *model3 = kl_model_load("test_assets/colorcalibration.obj");
+  kl_render_add_model(model3);
 
   kl_vec3f_t light1_pos = { .x = 500.0f, .y = 400.0f, .z = 0.0f };
   kl_render_add_light(&light1_pos, 1.0f, 0.8f, 0.6f, 25000.0f);
@@ -48,7 +50,8 @@ int main(int argc, char **argv) {
   kl_vec3f_t light3_pos = { .x = 0.0f, .y = 300.0f, .z = 0.0f };
   //kl_render_add_light(&light3_pos, 1.0f, 0.8f, 0.5f, 25000.0f);
   kl_vec3f_t envlight_dir = { -2.0f, -2.0f, 1.0f };
-  kl_render_set_envlight(&envlight_dir, 0.8f, 0.8f, 1.0f, 0.01f, 1.0f, 0.9f, 0.6f, 0.0f);
+  kl_render_set_envlight(&envlight_dir, 0.8f, 0.8f, 1.0f, 0.0f, 1.0f, 0.9f, 0.6f, 0.0f);
+  //kl_render_set_envlight(&envlight_dir, 0.8f, 0.8f, 1.0f, 0.2f, 1.0f, 0.9f, 0.6f, 1.0f);
   
   kl_timer_t timer = KL_TIMER_INIT;
   
